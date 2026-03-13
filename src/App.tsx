@@ -81,6 +81,10 @@ export type FormData = {
   instrumental: boolean
   /** Card/box style: slide, fadeUp, scale, pill, glass */
   cardStyle: CardStyleId
+  /** When enabled, the info card disappears after a few seconds using the same animation style in reverse */
+  cardAutoHide: boolean
+  /** Seconds after which the card should start disappearing (only when cardAutoHide is true) */
+  cardAutoHideSeconds: number
   /** When main media is video: animation applied to the video (zoom, pan, etc.) */
   videoAnimation: VideoAnimationId
   /** When main visual is image/slideshow: detect face with AI and apply gentle nod animation */
@@ -91,6 +95,10 @@ export type FormData = {
   animeBackend: 'local' | 'replicate'
   /** Replicate API token (only when animeBackend === 'replicate') */
   replicateApiKey: string
+  /** When main media is video: loop the video so the final length follows the audio (when available) instead of being cut to the video duration */
+  loopMainVideoToAudio: boolean
+  /** Output method: offline render (deterministic) vs real-time recording (MediaRecorder) */
+  exportMethod: 'render' | 'record'
 }
 
 export type VideoOrientationId = '16:9' | '9:16' | '1:1' | '4:5'
@@ -123,11 +131,15 @@ const initialForm: FormData = {
   audioTrimEnd: 0,
   instrumental: false,
   cardStyle: 'slide',
+  cardAutoHide: false,
+  cardAutoHideSeconds: 8,
   videoAnimation: 'kenBurns',
   faceNodAnimation: false,
   convertToAnime: false,
   animeBackend: 'local',
   replicateApiKey: '',
+  loopMainVideoToAudio: false,
+  exportMethod: 'render',
 }
 
 export default function App() {
@@ -337,6 +349,22 @@ export default function App() {
                     </button>
                   ))}
                 </div>
+                {form.mainMedia?.type === 'video' && (
+                  <div className="mt-4">
+                    <label className="flex items-center gap-3 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={form.loopMainVideoToAudio}
+                        onChange={(e) => setForm((f) => ({ ...f, loopMainVideoToAudio: e.target.checked }))}
+                        className="rounded border-white/20 bg-white/5 text-violet-500 focus:ring-violet-500"
+                      />
+                      <span className="text-slate-300">Loop main video to match audio length</span>
+                    </label>
+                    <p className="text-slate-500 text-xs mt-1">
+                      When you use a main video with an audio track, the video will repeat so the final export matches the audio duration instead of stopping at the video&apos;s own length.
+                    </p>
+                  </div>
+                )}
               </motion.div>
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
@@ -528,6 +556,42 @@ export default function App() {
                     </button>
                   ))}
                 </div>
+                {form.cardStyle !== 'none' && (
+                  <div className="mt-4 space-y-2">
+                    <label className="flex items-center gap-3 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={form.cardAutoHide}
+                        onChange={(e) => setForm((f) => ({ ...f, cardAutoHide: e.target.checked }))}
+                        className="rounded border-white/20 bg-white/5 text-violet-500 focus:ring-violet-500"
+                      />
+                      <span className="text-slate-300 text-sm">
+                        Hide card after a few seconds
+                      </span>
+                    </label>
+                    {form.cardAutoHide && (
+                      <div className="flex items-center gap-3">
+                        <span className="text-slate-400 text-sm">Show card for</span>
+                        <input
+                          type="number"
+                          min={2}
+                          max={120}
+                          value={form.cardAutoHideSeconds}
+                          onChange={(e) => {
+                            const v = Number(e.target.value)
+                            const sec = !Number.isNaN(v) ? Math.max(2, Math.min(120, v)) : 8
+                            setForm((f) => ({ ...f, cardAutoHideSeconds: sec }))
+                          }}
+                          className="w-20 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-white focus:border-violet-500/50 outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                        />
+                        <span className="text-slate-400 text-sm">seconds, then fade out</span>
+                      </div>
+                    )}
+                    <p className="text-slate-500 text-xs">
+                      The card will appear with the selected style, stay visible for the chosen time, then disappear using the same animation in reverse.
+                    </p>
+                  </div>
+                )}
               </motion.div>
 
               <motion.div
@@ -731,6 +795,17 @@ export default function App() {
                 <h3 className="text-lg font-semibold text-slate-200 mb-3">Output</h3>
                 <div className="flex flex-wrap items-center gap-4">
                   <label className="flex items-center gap-2">
+                    <span className="text-slate-400 text-sm">Method</span>
+                    <select
+                      value={form.exportMethod}
+                      onChange={(e) => setForm((f) => ({ ...f, exportMethod: e.target.value as 'render' | 'record' }))}
+                      className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-white focus:border-violet-500/50 outline-none"
+                    >
+                      <option value="render">Render (recommended)</option>
+                      <option value="record">Record (faster)</option>
+                    </select>
+                  </label>
+                  <label className="flex items-center gap-2">
                     <span className="text-slate-400 text-sm">Orientation</span>
                     <select
                       value={form.videoOrientation}
@@ -801,7 +876,9 @@ export default function App() {
                     <span className="text-violet-400/90 text-sm">Length from audio when provided</span>
                   )}
                 </div>
-                <p className="text-slate-500 text-sm mt-2">When on, rendering uses your GPU for 720p, 1080p, or 4K. If you get &quot;Out of Memory&quot;, try 720p and 30 fps.</p>
+                <p className="text-slate-500 text-sm mt-2">
+                  Render uses VP8 (avoids memory limits). Record uses VP9. Record may stutter if the tab is in the background.
+                </p>
               </motion.div>
 
               <motion.div
