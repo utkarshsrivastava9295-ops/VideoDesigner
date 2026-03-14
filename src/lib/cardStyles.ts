@@ -35,7 +35,8 @@ export const CARD_STYLES: CardStyleOption[] = [
   { id: 'none', name: 'None', description: 'No card – video and effects only' },
 ]
 
-const ENTRANCE_MS = 1000
+/** Duration (ms) of the standard card entrance animation. Also reused when mirroring the exit. */
+export const CARD_ENTRANCE_MS = 1000
 
 function easeOutCubic(x: number): number {
   return 1 - Math.pow(1 - x, 3)
@@ -69,7 +70,7 @@ export function getCardAnimation(
   const pillCardH = height * 0.22
   const cardYBase = height - baseCardH - cardMarginBottom
   const pillCardY = height - pillCardH - cardMarginBottom
-  const e = easeOutCubic(Math.min(1, timeMs / ENTRANCE_MS))
+  const e = easeOutCubic(Math.min(1, timeMs / CARD_ENTRANCE_MS))
 
   switch (styleId) {
     case 'slide': {

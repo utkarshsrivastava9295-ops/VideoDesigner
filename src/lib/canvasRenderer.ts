@@ -11,7 +11,7 @@ import { drawVisualizer } from './drawVisualizers'
 import type { BackgroundEffectId } from './videoBackgroundEffects'
 import { drawBackgroundEffect } from './drawBackgroundEffects'
 import type { CardStyleId } from './cardStyles'
-import { getCardAnimation } from './cardStyles'
+import { getCardAnimation, CARD_ENTRANCE_MS } from './cardStyles'
 
 export type SlideshowTransitionId =
   | 'fade'
@@ -60,7 +60,9 @@ function getVideoAnimationTransform(timeMs: number, animation: VideoAnimationId,
   const resolved: Concrete =
     animation === 'random'
       ? VIDEO_ANIMATION_IDS[Math.floor(timeMs / loop) % VIDEO_ANIMATION_IDS.length]
-      : ((animation || 'kenBurns') as Concrete)
+      : (animation === 'none' || animation == null || (animation as string) === ''
+          ? 'none'
+          : (animation as Concrete))
   const t = (timeMs % loop) / loop
   const smooth = (x: number) => x * x * (3 - 2 * x)
   switch (resolved) {
@@ -159,6 +161,8 @@ export function drawFrame(
     instrumental?: boolean
     /** Card/box style: slide, fadeUp, scale, pill, glass */
     cardStyle?: CardStyleId
+    /** When set, the info card will start to disappear after this many seconds using the same animation mirrored */
+    cardAutoHideSeconds?: number
     /** Slideshow: multiple images with transitions */
     slideshowImages?: HTMLImageElement[] | null
     slideshowCurrentIndex?: number
@@ -178,7 +182,7 @@ export function drawFrame(
     drawInstrumentalFrame(ctx, opts)
     return
   }
-  const { width, height, timeMs, durationMs, style, image, frontVideo, title, artist, album, lyricsLines, spectrumBars, audioLevel, visualizer, backgroundEffect, imageOpacityWithEffect, backgroundVideo, frontImageOpacityWhenVideo, visualizerSize, visualizerPosition, cardStyle, slideshowImages, slideshowCurrentIndex = 0, slideshowTransitionProgress = 0, slideshowTransition = 'fade', slideshowSlideDurationMs, videoAnimation: videoAnimationOpt = 'kenBurns', faceBox, animeFrames } = opts
+  const { width, height, timeMs, durationMs, style, image, frontVideo, title, artist, album, lyricsLines, spectrumBars, audioLevel, visualizer, backgroundEffect, imageOpacityWithEffect, backgroundVideo, frontImageOpacityWhenVideo, visualizerSize, visualizerPosition, cardStyle, cardAutoHideSeconds, slideshowImages, slideshowCurrentIndex = 0, slideshowTransitionProgress = 0, slideshowTransition = 'fade', slideshowSlideDurationMs, videoAnimation: videoAnimationOpt = 'kenBurns', faceBox, animeFrames } = opts
   const videoAnimation = videoAnimationOpt ?? 'kenBurns'
   const hasSlideshow = slideshowImages && slideshowImages.length > 0
   const hasImage = !!(image && image.complete && image.naturalWidth > 0)
@@ -352,7 +356,21 @@ export function drawFrame(
   const margin = width * 0.04
   const hasLyrics = lyricsLines.length > 0
   const cardInsetX = width * 0.02
-  const cardAnim = getCardAnimation(cardStyleId, timeMs, width, height, margin)
+  // Card timing: optional auto-hide after N seconds, using the same entrance animation mirrored for exit.
+  let cardVisible = true
+  let cardTimeForAnim = timeMs
+  if (cardStyleId !== 'none' && typeof cardAutoHideSeconds === 'number' && cardAutoHideSeconds > 0) {
+    const hideStartMs = cardAutoHideSeconds * 1000
+    if (timeMs >= hideStartMs) {
+      const elapsedSinceHide = timeMs - hideStartMs
+      if (elapsedSinceHide >= CARD_ENTRANCE_MS) {
+        cardVisible = false
+      } else {
+        cardTimeForAnim = Math.max(0, CARD_ENTRANCE_MS - elapsedSinceHide)
+      }
+    }
+  }
+  const cardAnim = getCardAnimation(cardStyleId, cardTimeForAnim, width, height, margin)
   const { drawX: drawCardX, drawY: cardY, cardW, cardH, scale: cardScale, alpha: cardAlpha, radius: cardRadius, useGlass: cardUseGlass, useNeon: cardUseNeon } = cardAnim
 
   // —— Visualizer on video (strip or full area) when lyrics are provided ——
@@ -381,7 +399,7 @@ export function drawFrame(
     ctx.restore()
   }
 
-  if (cardStyleId !== 'none') {
+  if (cardStyleId !== 'none' && cardVisible) {
   // —— 2) Volume bar (inside card, left edge) ——
   const volBarW = width * 0.02
   const volBarH = cardH * 0.45
@@ -775,12 +793,12 @@ function drawInstrumentalFrame(ctx: CanvasRenderingContext2D, opts: Instrumental
     ctx.restore()
   }
 
-  // Ken Burns: slow zoom and gentle pan (20s loop)
-  const loop = (timeMs / 20000) % 1
-  const zoom = 1 + 0.09 * (1 - Math.cos(loop * Math.PI * 2)) / 2
-  const panX = 0.015 * w * Math.sin(t * 0.4)
-  const panY = 0.012 * h * Math.cos(t * 0.35)
+  // Cover animation: respect videoAnimation (use none when selected)
   const coverSize = Math.min(w, h) * 0.58
+  const coverAnim = getVideoAnimationTransform(timeMs, videoAnimation, 20000)
+  const zoom = coverAnim.scale
+  const panX = coverAnim.panX * coverSize
+  const panY = coverAnim.panY * coverSize
   const cx = w / 2
   const cy = h / 2 - h * 0.02
   const coverX = cx - coverSize / 2
@@ -817,11 +835,11 @@ function drawInstrumentalFrame(ctx: CanvasRenderingContext2D, opts: Instrumental
         const vw = src.w
         const vh = src.h
         const anim = getVideoAnimationTransform(timeMs, videoAnimation, 10000)
-        const scale = (coverSize * zoom * anim.scale) / Math.min(vw, vh)
+        const scale = (coverSize * anim.scale) / Math.min(vw, vh)
         const sW = vw * scale
         const sH = vh * scale
-        const sx = cx + panX - sW / 2 - anim.panX * sW
-        const sy = cy + panY - sH / 2 - anim.panY * sH
+        const sx = cx - sW / 2 - anim.panX * sW
+        const sy = cy - sH / 2 - anim.panY * sH
         if (src.type === 'video') ctx.drawImage(src.el, 0, 0, vw, vh, sx, sy, sW, sH)
         else if (src.type === 'animeBlend') {
           ctx.drawImage(src.img1, 0, 0, vw, vh, sx, sy, sW, sH)
