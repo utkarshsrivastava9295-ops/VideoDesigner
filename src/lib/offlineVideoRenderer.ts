@@ -2,6 +2,7 @@ import type { FormData, VideoOrientationId } from '../App'
 import { drawFrame, loadImage, SLIDESHOW_TRANSITION_IDS } from './canvasRenderer'
 import { detectFaceInImage, detectFacesInImages, type FaceBox } from './faceDetection'
 import { convertImageToAnime, isAnimeConversionAvailable } from './animeConversion'
+import { seekVideo } from './videoSeek'
 
 let ffmpegSingleton: import('@ffmpeg/ffmpeg').FFmpeg | null = null
 let ffmpegLoadPromise: Promise<import('@ffmpeg/ffmpeg').FFmpeg> | null = null
@@ -64,38 +65,72 @@ async function blobToUint8Array(blob: Blob): Promise<Uint8Array> {
   return new Uint8Array(ab)
 }
 
-async function seekVideo(video: HTMLVideoElement, tSeconds: number) {
-  const target = Math.max(0, Math.min(video.duration || 0, tSeconds))
-  if (!Number.isFinite(target)) return
-  if (Math.abs((video.currentTime ?? 0) - target) < 0.01) return
-  await new Promise<void>((resolve, reject) => {
-    const onSeeked = () => {
-      cleanup()
-      resolve()
-    }
-    const onError = () => {
-      cleanup()
-      reject(new Error('Video seek failed'))
-    }
-    const cleanup = () => {
-      video.removeEventListener('seeked', onSeeked)
-      video.removeEventListener('error', onError as EventListener)
-      clearTimeout(timeout)
-    }
-    const timeout = setTimeout(() => {
-      cleanup()
-      resolve()
-    }, 8000)
-    video.addEventListener('seeked', onSeeked)
-    video.addEventListener('error', onError as EventListener)
-    video.currentTime = target
-  })
+function isMp4File(file: File): boolean {
+  return file.type === 'video/mp4' || file.name.toLowerCase().endsWith('.mp4')
+}
+
+export async function ensureWebmVideo(
+  file: File,
+  cb: { onStatus?: (msg: string | null) => void; isCancelled?: () => boolean }
+): Promise<Blob> {
+  if (!isMp4File(file)) return file
+  return convertMp4ToWebm(file, { onStatus: cb.onStatus })
 }
 
 export type OfflineRenderCallbacks = {
   onProgress?: (percent: number) => void
   onStatus?: (message: string | null) => void
   isCancelled?: () => boolean
+}
+
+/** Convert MP4 blob to WebM (VP8/Vorbis) – avoids decode/seek errors with some MP4 files. */
+export async function convertMp4ToWebm(
+  mp4Blob: Blob,
+  cb: { onStatus?: (msg: string | null) => void } = {}
+): Promise<Blob> {
+  const { onStatus } = cb
+  onStatus?.('Converting MP4 to WebM…')
+  console.log('[FFmpeg] Converting MP4 to WebM (input)')
+  const ffmpeg = await getFFmpeg()
+  const data = await blobToUint8Array(mp4Blob)
+  await ffmpeg.writeFile('input.mp4', data)
+  const ret = await ffmpeg.exec([
+    '-i', 'input.mp4',
+    '-c:v', 'libvpx',
+    '-c:a', 'libvorbis',
+    '-q:a', '4',
+    'output.webm',
+  ])
+  await ffmpeg.deleteFile('input.mp4').catch(() => {})
+  if (ret !== 0) throw new Error('MP4 to WebM conversion failed')
+  const out = await ffmpeg.readFile('output.webm')
+  await ffmpeg.deleteFile('output.webm').catch(() => {})
+  return new Blob([new Uint8Array(out as Uint8Array)], { type: 'video/webm' })
+}
+
+/** Convert WebM blob to MP4 (H.264/AAC) using FFmpeg. */
+export async function convertWebmToMp4(
+  webmBlob: Blob,
+  cb: { onStatus?: (msg: string | null) => void; isCancelled?: () => boolean } = {}
+): Promise<Blob> {
+  const { onStatus } = cb
+  onStatus?.('Converting WebM to MP4…')
+  console.log('[FFmpeg] Converting WebM to MP4')
+  const ffmpeg = await getFFmpeg()
+  const data = await blobToUint8Array(webmBlob)
+  await ffmpeg.writeFile('input.webm', data)
+  const ret = await ffmpeg.exec([
+    '-i', 'input.webm',
+    '-c:v', 'libx264',
+    '-c:a', 'aac',
+    '-movflags', '+faststart',
+    'output.mp4',
+  ])
+  await ffmpeg.deleteFile('input.webm').catch(() => {})
+  if (ret !== 0) throw new Error('WebM to MP4 conversion failed')
+  const out = await ffmpeg.readFile('output.mp4')
+  await ffmpeg.deleteFile('output.mp4').catch(() => {})
+  return new Blob([new Uint8Array(out as Uint8Array)], { type: 'video/mp4' })
 }
 
 /** Max frames in FFmpeg's virtual FS at once. VP8 uses less memory than VP9. */
@@ -108,6 +143,9 @@ const MAX_FRAMES_BY_RESOLUTION: Record<string, number> = {
 export async function renderVideoOfflineWebm(form: FormData, cb: OfflineRenderCallbacks = {}): Promise<Blob> {
   const { onProgress, onStatus, isCancelled } = cb
   const cancelled = () => (typeof isCancelled === 'function' ? isCancelled() : false)
+
+  console.log('[FFmpeg] Starting render')
+  onProgress?.(0)
 
   if (form.convertToAnime && !isAnimeConversionAvailable(form.replicateApiKey, form.animeBackend)) {
     throw new Error(
@@ -130,6 +168,7 @@ export async function renderVideoOfflineWebm(form: FormData, cb: OfflineRenderCa
   let audioTrimStart = 0
   let audioTrimEnd = 0
   if (form.audioFile) {
+    console.log('[FFmpeg] Loading audio…')
     try {
       const arrayBuffer = await form.audioFile.arrayBuffer()
       const DecodeCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
@@ -141,6 +180,7 @@ export async function renderVideoOfflineWebm(form: FormData, cb: OfflineRenderCa
       audioTrimEnd = (form.audioTrimEnd || 0) > 0 ? Math.min(form.audioTrimEnd, fullDurationSec) : fullDurationSec
       if (audioTrimEnd <= audioTrimStart) audioTrimEnd = fullDurationSec
       durationMs = Math.round((audioTrimEnd - audioTrimStart) * 1000)
+      console.log('[FFmpeg] Audio loaded, durationMs:', durationMs)
     } catch {
       throw new Error('Could not load or decode the audio file.')
     }
@@ -158,9 +198,11 @@ export async function renderVideoOfflineWebm(form: FormData, cb: OfflineRenderCa
   let frontVideo: HTMLVideoElement | null = null
   let frontVideoUrl: string | null = null
   let mainVideoDurationMs: number | null = null
+  let mainVideoBlobForAudio: Blob | null = null
 
   try {
     if (form.mainMedia?.type === 'image') {
+      console.log('[FFmpeg] Loading main image…')
       let imageUrl = form.mainMedia.preview
       if (form.convertToAnime) {
         onStatus?.('Converting image to anime…')
@@ -170,9 +212,11 @@ export async function renderVideoOfflineWebm(form: FormData, cb: OfflineRenderCa
       }
       image = await loadImage(imageUrl)
       if (form.faceNodAnimation && image) faceBox = await detectFaceInImage(image)
+      console.log('[FFmpeg] Main image loaded')
     }
 
     if (form.mainMedia?.type === 'slideshow' && form.mainMedia.files.length > 0) {
+      console.log('[FFmpeg] Loading slideshow…')
       let urls = form.mainMedia.files.map((f) => f.preview)
       if (form.convertToAnime) {
         for (let i = 0; i < urls.length; i++) {
@@ -193,10 +237,13 @@ export async function renderVideoOfflineWebm(form: FormData, cb: OfflineRenderCa
       if (form.faceNodAnimation && slideshowImages.length > 0) {
         slideshowFaceBoxes = await detectFacesInImages(slideshowImages)
       }
+      console.log('[FFmpeg] Slideshow loaded, images:', slideshowImages.length)
     }
 
     if (form.mainMedia?.type === 'video') {
-      frontVideoUrl = URL.createObjectURL(form.mainMedia.file)
+      console.log('[FFmpeg] Loading main video…')
+      mainVideoBlobForAudio = await ensureWebmVideo(form.mainMedia.file, { onStatus, isCancelled })
+      frontVideoUrl = URL.createObjectURL(mainVideoBlobForAudio)
       frontVideo = document.createElement('video')
       frontVideo.src = frontVideoUrl
       frontVideo.muted = true
@@ -204,7 +251,7 @@ export async function renderVideoOfflineWebm(form: FormData, cb: OfflineRenderCa
       frontVideo.preload = 'auto'
       frontVideo.setAttribute('playsinline', '')
       await new Promise<void>((resolve, reject) => {
-        frontVideo!.onloadedmetadata = () => resolve()
+        frontVideo!.onloadeddata = () => resolve()
         frontVideo!.onerror = () => reject(new Error('Video failed to load'))
         frontVideo!.load()
       })
@@ -233,11 +280,15 @@ export async function renderVideoOfflineWebm(form: FormData, cb: OfflineRenderCa
           const img = await loadImage(convertedUrl)
           animeKeyframes.push(img)
         }
+        console.log('[FFmpeg] Anime keyframes created:', animeKeyframes.length)
       }
+      console.log('[FFmpeg] Main video loaded')
     }
 
     if (form.videoFile) {
-      backgroundVideoUrl = URL.createObjectURL(form.videoFile)
+      console.log('[FFmpeg] Loading background video…')
+      const bgVideoBlob = await ensureWebmVideo(form.videoFile, { onStatus, isCancelled })
+      backgroundVideoUrl = URL.createObjectURL(bgVideoBlob)
       backgroundVideo = document.createElement('video')
       backgroundVideo.src = backgroundVideoUrl
       backgroundVideo.loop = true
@@ -246,10 +297,11 @@ export async function renderVideoOfflineWebm(form: FormData, cb: OfflineRenderCa
       backgroundVideo.preload = 'auto'
       backgroundVideo.setAttribute('playsinline', '')
       await new Promise<void>((resolve, reject) => {
-        backgroundVideo!.onloadedmetadata = () => resolve()
+        backgroundVideo!.onloadeddata = () => resolve()
         backgroundVideo!.onerror = () => reject(new Error('Video failed to load'))
         backgroundVideo!.load()
       })
+      console.log('[FFmpeg] Background video loaded')
     }
 
     const lyricsLines = form.includeLyrics && form.lyrics.trim()
@@ -259,9 +311,11 @@ export async function renderVideoOfflineWebm(form: FormData, cb: OfflineRenderCa
     const fps = form.fps
     const frameInterval = 1000 / fps
     const totalFrames = Math.max(1, Math.ceil(durationMs / frameInterval))
-
-    console.log('[Render] all assets loaded, initialising FFmpeg…')
+    console.log('[FFmpeg] Assets ready. totalFrames:', totalFrames, 'fps:', fps, 'durationMs:', durationMs)
+    onProgress?.(2)
+    console.log('[FFmpeg] Initialising FFmpeg…')
     const ffmpeg = await getFFmpeg()
+    console.log('[FFmpeg] FFmpeg loaded')
 
     // Defer audio until mux – keep it out of memory during chunk encodes
     let audioInputName: string | null = null
@@ -271,6 +325,14 @@ export async function renderVideoOfflineWebm(form: FormData, cb: OfflineRenderCa
 
     const maxFramesPerChunk = MAX_FRAMES_BY_RESOLUTION[form.resolution] ?? 60
 
+    // Single /frames dir – reuse to avoid createDir/deleteDir bugs with many chunks
+    const framesDir = '/frames'
+    try {
+      await ffmpeg.createDir(framesDir)
+    } catch {
+      // ignore if exists
+    }
+
     // Chunked rendering to avoid "memory access out of bounds" – process frames in small batches
     const segmentNames: string[] = []
     const numChunks = Math.ceil(totalFrames / maxFramesPerChunk)
@@ -279,13 +341,19 @@ export async function renderVideoOfflineWebm(form: FormData, cb: OfflineRenderCa
     for (let chunkIdx = 0; chunkIdx < numChunks; chunkIdx++) {
       if (cancelled()) throw new Error('cancelled')
 
+      console.log('[FFmpeg] Chunk', chunkIdx + 1, '/', numChunks)
       const frameStart = chunkIdx * maxFramesPerChunk
       const frameEnd = Math.min(frameStart + maxFramesPerChunk, totalFrames)
       const chunkFrames = frameEnd - frameStart
 
-      const framesDir = `/frames_${chunkIdx}`
+      // Clear previous chunk's frames from /frames
       try {
-        await ffmpeg.createDir(framesDir)
+        const nodes = await ffmpeg.listDir(framesDir)
+        for (const n of nodes) {
+          if (!n.isDir && typeof n.name === 'string') {
+            await ffmpeg.deleteFile(`${framesDir}/${n.name}`)
+          }
+        }
       } catch {
         // ignore
       }
@@ -299,14 +367,14 @@ export async function renderVideoOfflineWebm(form: FormData, cb: OfflineRenderCa
         if (cancelled()) throw new Error('cancelled')
         const timeMs = Math.min(durationMs, Math.round(i * frameInterval))
 
-        if (backgroundVideo && backgroundVideo.duration && isFinite(backgroundVideo.duration) && backgroundVideo.duration > 0) {
-          const t = (timeMs / 1000) % backgroundVideo.duration
-          await seekVideo(backgroundVideo, t)
+        const seeks: Promise<void>[] = []
+        if (backgroundVideo?.duration && isFinite(backgroundVideo.duration) && backgroundVideo.duration > 0) {
+          seeks.push(seekVideo(backgroundVideo, (timeMs / 1000) % backgroundVideo.duration))
         }
-        if (frontVideo && frontVideo.duration && isFinite(frontVideo.duration) && frontVideo.duration > 0) {
-          const t = (timeMs / 1000) % frontVideo.duration
-          await seekVideo(frontVideo, t)
+        if (frontVideo?.duration && isFinite(frontVideo.duration) && frontVideo.duration > 0) {
+          seeks.push(seekVideo(frontVideo, (timeMs / 1000) % frontVideo.duration))
         }
+        if (seeks.length > 0) await Promise.all(seeks)
 
         const slideDurationMs = form.slideshowSecondsPerSlide * 1000
         const transitionDurationMs = Math.min(1200, Math.max(400, slideDurationMs * 0.35))
@@ -379,27 +447,48 @@ export async function renderVideoOfflineWebm(form: FormData, cb: OfflineRenderCa
         }
       }
 
+      const ext = form.outputFormat === 'mp4' ? 'mp4' : 'webm'
       onStatus?.(`Encoding segment ${chunkIdx + 1}/${numChunks}…`)
-      const segmentName = `/segment_${chunkIdx}.webm`
+      console.log('[FFmpeg] Encoding segment', chunkIdx + 1, '…')
+      const segmentName = `/segment_${chunkIdx}.${ext}`
       segmentNames.push(segmentName)
 
-      // VP9 causes "memory access out of bounds" in ffmpeg.wasm – use VP8
-      const encodeArgs: string[] = [
-        '-framerate', String(fps),
-        '-i', `${framesDir}/frame%06d.jpg`,
-        '-c:v', 'libvpx',
-        '-b:v', vBitrate,
-        '-qmin', '10',
-        '-qmax', '42',
-        '-pix_fmt', 'yuv420p',
-        segmentName,
-      ]
+      // Use concat demuxer with explicit file list – image2 frame%06d fails to find files in ffmpeg.wasm virtual FS
+      const concatListPath = `/concat_${chunkIdx}.txt`
+      const concatLines = Array.from({ length: chunkFrames }, (_, idx) =>
+        `file '${framesDir}/frame${String(idx).padStart(6, '0')}.jpg'`
+      )
+      await ffmpeg.writeFile(concatListPath, new TextEncoder().encode(concatLines.join('\n')))
+
+      const encodeArgs: string[] =
+        form.outputFormat === 'mp4'
+          ? [
+              '-f', 'concat', '-safe', '0', '-i', concatListPath,
+              '-r', String(fps),
+              '-c:v', 'libx264',
+              '-b:v', vBitrate,
+              '-pix_fmt', 'yuv420p',
+              '-movflags', '+faststart',
+              segmentName,
+            ]
+          : [
+              '-f', 'concat', '-safe', '0', '-i', concatListPath,
+              '-r', String(fps),
+              '-c:v', 'libvpx',
+              '-b:v', vBitrate,
+              '-qmin', '10',
+              '-qmax', '42',
+              '-pix_fmt', 'yuv420p',
+              segmentName,
+            ]
 
       const logLines: string[] = []
       const logCb = ({ message }: { message: string }) => { logLines.push(message) }
       ffmpeg.on('log', logCb)
       const ret = await ffmpeg.exec(encodeArgs)
       ffmpeg.off('log', logCb)
+      await ffmpeg.deleteFile(concatListPath).catch(() => {})
+      console.log('[FFmpeg] Segment', chunkIdx + 1, 'done, ret=', ret)
       if (ret !== 0) {
         const tail = logLines.slice(-8).join('\n')
         throw new Error(`FFmpeg encode failed (${ret}). Log:\n${tail || '(no log)'}`)
@@ -407,39 +496,26 @@ export async function renderVideoOfflineWebm(form: FormData, cb: OfflineRenderCa
 
       // Yield to event loop to allow GC
       await new Promise((r) => setTimeout(r, 0))
-
-      // Free memory: delete frame files from this chunk
-      try {
-        const nodes = await ffmpeg.listDir(framesDir)
-        for (const n of nodes) {
-          if (!n.isDir && typeof n.name === 'string') {
-            await ffmpeg.deleteFile(`${framesDir}/${n.name}`)
-          }
-        }
-        await ffmpeg.deleteDir(framesDir)
-      } catch {
-        // ignore
-      }
     }
 
     onProgress?.(90)
+    console.log('[FFmpeg] Merging segments…')
 
-    const outputName = 'output.webm'
-    let videoInputForMux = 'concat_video.webm'
+    const ext = form.outputFormat === 'mp4' ? 'mp4' : 'webm'
+    const outputName = `output.${ext}`
+    const videoInputForMux = `concat_video.${ext}`
 
     if (segmentNames.length === 1) {
-      // Single segment – skip concat to avoid concat demuxer path resolution issues
       await ffmpeg.rename(segmentNames[0], videoInputForMux)
     } else {
       onStatus?.('Merging segments…')
       const concatList = segmentNames.map((s) => `file '${s}'`).join('\n')
       const concatData = new TextEncoder().encode(concatList)
       await ffmpeg.writeFile('concat.txt', concatData)
-      const concatOut = 'concat_video.webm'
 
       const ret = await ffmpeg.exec([
         '-f', 'concat', '-safe', '0', '-i', 'concat.txt',
-        '-c', 'copy', concatOut,
+        '-c', 'copy', videoInputForMux,
       ])
       if (ret !== 0) throw new Error(`FFmpeg concat failed with code ${ret}`)
 
@@ -449,11 +525,13 @@ export async function renderVideoOfflineWebm(form: FormData, cb: OfflineRenderCa
 
     if (hasAudio) {
       onStatus?.('Adding audio…')
+      console.log('[FFmpeg] Muxing audio…')
       audioInputName = form.audioFile ? 'audio_in' : 'main_video_in'
       const audioData =
         form.audioFile ? await fetchFile(form.audioFile)
-        : form.mainMedia?.type === 'video' ? await fetchFile(form.mainMedia.file)
-        : new Uint8Array(0)
+        : form.mainMedia?.type === 'video'
+          ? await fetchFile(mainVideoBlobForAudio ?? form.mainMedia.file)
+          : new Uint8Array(0)
       await ffmpeg.writeFile(audioInputName, audioData)
 
       const muxArgs: string[] = ['-i', videoInputForMux]
@@ -462,7 +540,8 @@ export async function renderVideoOfflineWebm(form: FormData, cb: OfflineRenderCa
       } else {
         muxArgs.push('-i', audioInputName)
       }
-      muxArgs.push('-map', '0:v:0', '-map', '1:a:0?', '-c:v', 'copy', '-c:a', 'libvorbis', '-q:a', '4', '-shortest', outputName)
+      const audioCodec = form.outputFormat === 'mp4' ? ['-c:a', 'aac', '-b:a', '128k'] : ['-c:a', 'libvorbis', '-q:a', '4']
+      muxArgs.push('-map', '0:v:0', '-map', '1:a:0?', '-c:v', 'copy', ...audioCodec, '-shortest', outputName)
       const muxRet = await ffmpeg.exec(muxArgs)
       if (muxRet !== 0) throw new Error(`FFmpeg mux failed with code ${muxRet}`)
       await ffmpeg.deleteFile(videoInputForMux).catch(() => {})
@@ -476,7 +555,9 @@ export async function renderVideoOfflineWebm(form: FormData, cb: OfflineRenderCa
 
     onProgress?.(100)
     onStatus?.(null)
-    return new Blob([new Uint8Array(out as Uint8Array)], { type: 'video/webm' })
+    console.log('[FFmpeg] Render complete')
+    const mime = form.outputFormat === 'mp4' ? 'video/mp4' : 'video/webm'
+    return new Blob([new Uint8Array(out as Uint8Array)], { type: mime })
   } finally {
     try {
       if (backgroundVideoUrl) URL.revokeObjectURL(backgroundVideoUrl)

@@ -99,6 +99,10 @@ export type FormData = {
   loopMainVideoToAudio: boolean
   /** Output method: offline render (deterministic) vs real-time recording (MediaRecorder) */
   exportMethod: 'render' | 'record'
+  /** When using Render: encoder backend – FFmpeg (WASM) or WebCodecs (GPU when available) */
+  renderEncoder: 'ffmpeg' | 'webcodecs'
+  /** Output container format – WebM (VP8/VP9) or MP4 (H.264). Record method always outputs WebM. */
+  outputFormat: 'webm' | 'mp4'
 }
 
 export type VideoOrientationId = '16:9' | '9:16' | '1:1' | '4:5'
@@ -140,6 +144,8 @@ const initialForm: FormData = {
   replicateApiKey: '',
   loopMainVideoToAudio: false,
   exportMethod: 'render',
+  renderEncoder: 'ffmpeg',
+  outputFormat: 'mp4',
 }
 
 export default function App() {
@@ -801,10 +807,50 @@ export default function App() {
                       onChange={(e) => setForm((f) => ({ ...f, exportMethod: e.target.value as 'render' | 'record' }))}
                       className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-white focus:border-violet-500/50 outline-none"
                     >
-                      <option value="render">Render (recommended)</option>
-                      <option value="record">Record (faster)</option>
+                      <option value="render">Render – smooth, works in background</option>
+                      <option value="record">Record – requires focused tab</option>
                     </select>
                   </label>
+                  {form.exportMethod === 'render' && (
+                    <>
+                      <label className="flex items-center gap-2">
+                        <span className="text-slate-400 text-sm">Encoder</span>
+                        <select
+                          value={form.renderEncoder}
+                          onChange={(e) => setForm((f) => ({ ...f, renderEncoder: e.target.value as 'ffmpeg' | 'webcodecs' }))}
+                          className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-white focus:border-violet-500/50 outline-none"
+                        >
+                          <option value="ffmpeg">FFmpeg (WASM)</option>
+                          <option value="webcodecs">WebCodecs (GPU when available)</option>
+                        </select>
+                      </label>
+                      <label className="flex items-center gap-2">
+                        <span className="text-slate-400 text-sm">Format</span>
+                        <select
+                          value={form.outputFormat}
+                          onChange={(e) => setForm((f) => ({ ...f, outputFormat: e.target.value as 'webm' | 'mp4' }))}
+                          className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-white focus:border-violet-500/50 outline-none"
+                        >
+                          <option value="webm">WebM (VP8/VP9)</option>
+                          <option value="mp4">MP4 (H.264)</option>
+                        </select>
+                      </label>
+                    </>
+                  )}
+                  {form.exportMethod === 'record' && (
+                    <div className="w-full rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 flex flex-wrap items-center gap-3">
+                      <span className="text-amber-200/90 text-sm">
+                        Record requires keeping this tab focused. Output may stutter if you switch tabs. For smooth video and background operation, switch to Render.
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setForm((f) => ({ ...f, exportMethod: 'render' }))}
+                        className="shrink-0 px-4 py-1.5 rounded-lg bg-violet-500/30 border border-violet-400/40 text-violet-200 text-sm font-medium hover:bg-violet-500/40 transition"
+                      >
+                        Use Render instead
+                      </button>
+                    </div>
+                  )}
                   <label className="flex items-center gap-2">
                     <span className="text-slate-400 text-sm">Orientation</span>
                     <select
@@ -877,7 +923,7 @@ export default function App() {
                   )}
                 </div>
                 <p className="text-slate-500 text-sm mt-2">
-                  Render uses VP8 (avoids memory limits). Record uses VP9. Record may stutter if the tab is in the background.
+                  <strong className="text-slate-400">Render</strong>: Frame-by-frame encode. Choose <strong>FFmpeg</strong> (WASM, broad support) or <strong>WebCodecs</strong> (may use GPU in Chrome/Edge). Both work in background. <strong className="text-slate-400">Record</strong>: Real-time MediaRecorder; requires focused tab.
                 </p>
               </motion.div>
 

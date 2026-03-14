@@ -2,6 +2,7 @@ import type { FormData, VideoOrientationId } from '../App'
 import { drawFrame, loadImage, SLIDESHOW_TRANSITION_IDS } from './canvasRenderer'
 import { detectFaceInImage, detectFacesInImages, type FaceBox } from './faceDetection'
 import { convertImageToAnime, isAnimeConversionAvailable } from './animeConversion'
+import { ensureWebmVideo } from './offlineVideoRenderer'
 
 function getOutputDimensions(
   resolution: '720p' | '1080p' | '4k',
@@ -168,7 +169,8 @@ export async function recordVideoRealtimeWebm(form: FormData, cb: RealtimeRecord
 
     let mainVideoDurationMs: number | null = null
     if (form.mainMedia?.type === 'video') {
-      frontVideoObjectUrl = URL.createObjectURL(form.mainMedia.file)
+      const mainVideoBlob = await ensureWebmVideo(form.mainMedia.file, { onStatus, isCancelled })
+      frontVideoObjectUrl = URL.createObjectURL(mainVideoBlob)
       frontVideo = document.createElement('video')
       frontVideo.src = frontVideoObjectUrl
       frontVideo.muted = !!form.audioFile
@@ -223,7 +225,8 @@ export async function recordVideoRealtimeWebm(form: FormData, cb: RealtimeRecord
     }
 
     if (form.videoFile) {
-      videoObjectUrl = URL.createObjectURL(form.videoFile)
+      const bgVideoBlob = await ensureWebmVideo(form.videoFile, { onStatus, isCancelled })
+      videoObjectUrl = URL.createObjectURL(bgVideoBlob)
       backgroundVideo = document.createElement('video')
       backgroundVideo.src = videoObjectUrl
       backgroundVideo.loop = true

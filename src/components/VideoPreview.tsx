@@ -30,10 +30,11 @@ export function VideoPreview({ blob, onReset }: Props) {
   const url = URL.createObjectURL(blob)
   useEffect(() => () => URL.revokeObjectURL(url), [url])
 
+  const ext = blob.type === 'video/mp4' ? 'mp4' : 'webm'
   const handleDownload = () => {
     const a = document.createElement('a')
     a.href = url
-    a.download = `music-video-${Date.now()}.webm`
+    a.download = `music-video-${Date.now()}.${ext}`
     a.click()
     setDownloaded(true)
   }
@@ -52,7 +53,8 @@ export function VideoPreview({ blob, onReset }: Props) {
     setSplitProgress(0)
     try {
       const { ffmpeg } = await getFFmpeg()
-      const inputName = 'input.webm'
+      const inputExt = blob.type === 'video/mp4' ? 'mp4' : 'webm'
+      const inputName = `input.${inputExt}`
       await ffmpeg.writeFile(inputName, await toU8(blob))
 
       const zip = new JSZip()
@@ -65,7 +67,7 @@ export function VideoPreview({ blob, onReset }: Props) {
       for (let i = 0; i < partsCount; i++) {
         const start = basePartSec * i
         const partDuration = i === partsCount - 1 ? totalSec - start : basePartSec
-        const outputName = `part-${i + 1}.webm`
+        const outputName = `part-${i + 1}.${inputExt}`
 
         const progressCb = ({ progress }: { progress: number }) => {
           const p = Math.max(0, Math.min(1, progress))
@@ -172,7 +174,9 @@ export function VideoPreview({ blob, onReset }: Props) {
       </div>
       <div className="px-6 pb-4 space-y-1">
         <p className="text-slate-500 text-sm">
-          Video is in WebM format. Use VLC or Chrome to play; you can convert to MP4 with online tools if needed.
+          {blob.type === 'video/mp4'
+            ? 'Video is in MP4 format (H.264). Widely supported by players and platforms.'
+            : 'Video is in WebM format. Use VLC or Chrome to play.'}
         </p>
         <p className="text-slate-500 text-xs">
           To download equal-length parts, choose how many pieces you want and click &quot;Download parts (ZIP)&quot;. This uses FFmpeg in the app, so it may take a bit longer the first time.

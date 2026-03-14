@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
 import type { FormData } from '../App'
 import { renderVideoOfflineWebm } from '../lib/offlineVideoRenderer'
+import { renderVideoWebCodecs } from '../lib/webcodecsVideoRenderer'
 import { recordVideoRealtimeWebm } from '../lib/realtimeVideoRecorder'
 
 type Props = {
@@ -13,6 +14,8 @@ type Props = {
 export function VideoGenerator({ form, onComplete, onCancel }: Props) {
   const [progress, setProgress] = useState(0)
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
+  const [encoderInfo, setEncoderInfo] = useState<{ acceleration: string; codec: string } | null>(null)
+  const [gpuInfo, setGpuInfo] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [errorDetail, setErrorDetail] = useState<string | null>(null)
   const [durationFromAudio, setDurationFromAudio] = useState(false)
@@ -24,9 +27,14 @@ export function VideoGenerator({ form, onComplete, onCancel }: Props) {
     setErrorDetail(null)
     setProgress(0)
     setStatusMessage(null)
+    setEncoderInfo(null)
     setDurationFromAudio(false)
 
     async function run() {
+      const { checkGpuAvailable } = await import('../lib/gpuDetection')
+      const gpu = await checkGpuAvailable()
+      setGpuInfo(gpu.info)
+      console.log('[VideoGenerator] GPU:', gpu.available ? 'available' : 'not available', '—', gpu.info)
       try {
         const blob =
           form.exportMethod === 'record'
@@ -36,11 +44,18 @@ export function VideoGenerator({ form, onComplete, onCancel }: Props) {
                 onDurationSource: (src) => setDurationFromAudio(src === 'audio'),
                 isCancelled: () => cancelled.current,
               })
-            : await renderVideoOfflineWebm(form, {
-                onProgress: (p) => setProgress(Math.max(0, Math.min(100, p))),
-                onStatus: (msg) => setStatusMessage(msg),
-                isCancelled: () => cancelled.current,
-              })
+            : form.renderEncoder === 'webcodecs'
+              ? await renderVideoWebCodecs(form, {
+                  onProgress: (p) => setProgress(Math.max(0, Math.min(100, p))),
+                  onStatus: (msg) => setStatusMessage(msg),
+                  onEncoderInfo: (info) => setEncoderInfo(info),
+                  isCancelled: () => cancelled.current,
+                })
+              : await renderVideoOfflineWebm(form, {
+                  onProgress: (p) => setProgress(Math.max(0, Math.min(100, p))),
+                  onStatus: (msg) => setStatusMessage(msg),
+                  isCancelled: () => cancelled.current,
+                })
         if (cancelled.current) return
         onComplete(blob)
       } catch (err) {
@@ -66,7 +81,7 @@ export function VideoGenerator({ form, onComplete, onCancel }: Props) {
     return () => {
       cancelled.current = true
     }
-  }, [form.mainMedia, form.slideshowSecondsPerSlide, form.slideshowTransition, form.slideshowRandomOrder, form.videoAnimation, form.faceNodAnimation, form.convertToAnime, form.animeBackend, form.replicateApiKey, form.audioFile, form.audioTrimStart, form.audioTrimEnd, form.videoFile, form.title, form.artist, form.album, form.lyrics, form.includeLyrics, form.resolution, form.videoOrientation, form.preferGpu, form.durationSeconds, form.fps, form.style, form.visualizer, form.visualizerSize, form.visualizerPosition, form.backgroundEffect, form.imageOpacityWithEffect, form.frontImageOpacityWhenVideo, form.instrumental, form.cardStyle, form.cardAutoHide, form.cardAutoHideSeconds, form.loopMainVideoToAudio, onComplete])
+  }, [form.mainMedia, form.slideshowSecondsPerSlide, form.slideshowTransition, form.slideshowRandomOrder, form.videoAnimation, form.faceNodAnimation, form.convertToAnime, form.animeBackend, form.replicateApiKey, form.audioFile, form.audioTrimStart, form.audioTrimEnd, form.videoFile, form.title, form.artist, form.album, form.lyrics, form.includeLyrics, form.resolution, form.videoOrientation, form.preferGpu, form.durationSeconds, form.fps, form.style, form.visualizer, form.visualizerSize, form.visualizerPosition, form.backgroundEffect, form.imageOpacityWithEffect, form.frontImageOpacityWhenVideo, form.instrumental, form.cardStyle, form.cardAutoHide, form.cardAutoHideSeconds, form.loopMainVideoToAudio, form.exportMethod, form.renderEncoder, form.outputFormat, onComplete])
 
   const durationHint = form.audioFile && durationFromAudio ? '(from audio)' : `${form.durationSeconds || 60}s`
 
@@ -99,7 +114,14 @@ export function VideoGenerator({ form, onComplete, onCancel }: Props) {
         <>
           <div className="flex items-center justify-between mb-2">
             <span className="text-slate-300 font-medium">Generating your video</span>
-            <span className="text-violet-400 font-mono text-sm">{form.resolution === '4k' ? '4K' : form.resolution === '720p' ? '720p' : '1080p'} {form.videoOrientation}</span>
+            <span className="text-violet-400 font-mono text-sm">
+              {Math.round(progress)}% · {form.resolution === '4k' ? '4K' : form.resolution === '720p' ? '720p' : '1080p'} {form.videoOrientation}
+              {encoderInfo && (
+                <span className="ml-2 text-emerald-400/90 text-xs" title={encoderInfo.codec}>
+                  ({encoderInfo.acceleration})
+                </span>
+              )}
+            </span>
           </div>
           <div className="h-3 rounded-full bg-white/10 overflow-hidden mb-6">
             <motion.div
@@ -111,10 +133,16 @@ export function VideoGenerator({ form, onComplete, onCancel }: Props) {
             />
           </div>
           <p className="text-slate-500 text-sm mb-6">
-            {statusMessage ||
-              (form.exportMethod === 'record'
-                ? `Recording ${durationHint} at ${form.fps} fps. Keep this tab focused for smoothest video.`
-                : `Rendering at ${form.fps} fps.`)}
+            {statusMessage
+              ? `${statusMessage} — ${Math.round(progress)}%`
+              : form.exportMethod === 'record'
+                ? `Recording ${durationHint} at ${form.fps} fps — ${Math.round(progress)}%`
+                : `Rendering at ${form.fps} fps — ${Math.round(progress)}%`}
+            {gpuInfo && (
+              <span className="block mt-1 text-slate-600 text-xs" title={gpuInfo}>
+                {gpuInfo}
+              </span>
+            )}
           </p>
           <button
             onClick={onCancel}

@@ -60,7 +60,7 @@ function getVideoAnimationTransform(timeMs: number, animation: VideoAnimationId,
   const resolved: Concrete =
     animation === 'random'
       ? VIDEO_ANIMATION_IDS[Math.floor(timeMs / loop) % VIDEO_ANIMATION_IDS.length]
-      : (animation === 'none' || animation === undefined || animation === null || animation === ''
+      : (animation === 'none' || animation == null || (animation as string) === ''
           ? 'none'
           : (animation as Concrete))
   const t = (timeMs % loop) / loop
