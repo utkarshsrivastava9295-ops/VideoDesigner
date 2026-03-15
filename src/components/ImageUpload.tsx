@@ -4,7 +4,10 @@ import type { MainMedia } from '../App'
 
 declare global {
   interface Window {
-    electronAPI?: { downloadYoutubeVideo: (url: string) => Promise<{ data: string; mime: string }> }
+    electronAPI?: {
+      downloadYoutubeVideo: (url: string) => Promise<{ data: string; mime: string }>
+      downloadYoutubeAudio: (url: string) => Promise<{ data: string; mime: string }>
+    }
   }
 }
 

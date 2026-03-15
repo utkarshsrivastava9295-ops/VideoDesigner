@@ -156,7 +156,7 @@ export async function renderVideoWebCodecs(
 
     if (form.mainMedia?.type === 'video') {
       console.log('[WebCodecs] Loading main video…')
-      const mainVideoBlob = await ensureWebmVideo(form.mainMedia.file, { onStatus, isCancelled })
+      const mainVideoBlob = await ensureWebmVideo(form.mainMedia.file, { onStatus, isCancelled, convertIfMp4: form.convertMp4InputToWebm })
       frontVideoUrl = URL.createObjectURL(mainVideoBlob)
       frontVideo = document.createElement('video')
       frontVideo.src = frontVideoUrl
@@ -202,7 +202,7 @@ export async function renderVideoWebCodecs(
 
     if (form.videoFile) {
       console.log('[WebCodecs] Loading background video…')
-      const bgVideoBlob = await ensureWebmVideo(form.videoFile, { onStatus, isCancelled })
+      const bgVideoBlob = await ensureWebmVideo(form.videoFile, { onStatus, isCancelled, convertIfMp4: form.convertMp4InputToWebm })
       backgroundVideoUrl = URL.createObjectURL(bgVideoBlob)
       backgroundVideo = document.createElement('video')
       backgroundVideo.src = backgroundVideoUrl

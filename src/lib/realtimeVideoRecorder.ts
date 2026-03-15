@@ -169,7 +169,7 @@ export async function recordVideoRealtimeWebm(form: FormData, cb: RealtimeRecord
 
     let mainVideoDurationMs: number | null = null
     if (form.mainMedia?.type === 'video') {
-      const mainVideoBlob = await ensureWebmVideo(form.mainMedia.file, { onStatus, isCancelled })
+      const mainVideoBlob = await ensureWebmVideo(form.mainMedia.file, { onStatus, isCancelled, convertIfMp4: form.convertMp4InputToWebm })
       frontVideoObjectUrl = URL.createObjectURL(mainVideoBlob)
       frontVideo = document.createElement('video')
       frontVideo.src = frontVideoObjectUrl
@@ -225,7 +225,7 @@ export async function recordVideoRealtimeWebm(form: FormData, cb: RealtimeRecord
     }
 
     if (form.videoFile) {
-      const bgVideoBlob = await ensureWebmVideo(form.videoFile, { onStatus, isCancelled })
+      const bgVideoBlob = await ensureWebmVideo(form.videoFile, { onStatus, isCancelled, convertIfMp4: form.convertMp4InputToWebm })
       videoObjectUrl = URL.createObjectURL(bgVideoBlob)
       backgroundVideo = document.createElement('video')
       backgroundVideo.src = videoObjectUrl

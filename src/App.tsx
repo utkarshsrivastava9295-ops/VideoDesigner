@@ -103,6 +103,8 @@ export type FormData = {
   renderEncoder: 'ffmpeg' | 'webcodecs'
   /** Output container format – WebM (VP8/VP9) or MP4 (H.264). Record method always outputs WebM. */
   outputFormat: 'webm' | 'mp4'
+  /** When enabled, convert MP4 input videos to WebM before use (may fix decode/seek issues; can be slow) */
+  convertMp4InputToWebm: boolean
 }
 
 export type VideoOrientationId = '16:9' | '9:16' | '1:1' | '4:5'
@@ -146,6 +148,7 @@ const initialForm: FormData = {
   exportMethod: 'render',
   renderEncoder: 'ffmpeg',
   outputFormat: 'mp4',
+  convertMp4InputToWebm: false,
 }
 
 export default function App() {
@@ -356,7 +359,7 @@ export default function App() {
                   ))}
                 </div>
                 {form.mainMedia?.type === 'video' && (
-                  <div className="mt-4">
+                  <div className="mt-4 space-y-3">
                     <label className="flex items-center gap-3 cursor-pointer">
                       <input
                         type="checkbox"
@@ -366,8 +369,17 @@ export default function App() {
                       />
                       <span className="text-slate-300">Loop main video to match audio length</span>
                     </label>
-                    <p className="text-slate-500 text-xs mt-1">
-                      When you use a main video with an audio track, the video will repeat so the final export matches the audio duration instead of stopping at the video&apos;s own length.
+                    <label className="flex items-center gap-3 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={form.convertMp4InputToWebm}
+                        onChange={(e) => setForm((f) => ({ ...f, convertMp4InputToWebm: e.target.checked }))}
+                        className="rounded border-white/20 bg-white/5 text-violet-500 focus:ring-violet-500"
+                      />
+                      <span className="text-slate-300">Convert MP4 inputs to WebM</span>
+                    </label>
+                    <p className="text-slate-500 text-xs">
+                      Loop: when you use a main video with audio, the video repeats to match audio length. Convert: enable only if you see decode/seek errors with MP4 (may be slow).
                     </p>
                   </div>
                 )}
@@ -486,6 +498,17 @@ export default function App() {
                   exit={{ opacity: 0, height: 0 }}
                   className="rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm p-6"
                 >
+                  {form.mainMedia?.type !== 'video' && (
+                    <label className="flex items-center gap-3 cursor-pointer mb-4">
+                      <input
+                        type="checkbox"
+                        checked={form.convertMp4InputToWebm}
+                        onChange={(e) => setForm((f) => ({ ...f, convertMp4InputToWebm: e.target.checked }))}
+                        className="rounded border-white/20 bg-white/5 text-violet-500 focus:ring-violet-500"
+                      />
+                      <span className="text-slate-300">Convert MP4 inputs to WebM</span>
+                    </label>
+                  )}
                   <h3 className="text-lg font-semibold text-slate-200 mb-2">Front image opacity</h3>
                   <p className="text-slate-500 text-sm mb-3">Lower = more background video visible; higher = more of your image on top. For smoother playback, use 60 fps in Output.</p>
                   <div className="flex items-center gap-4">
