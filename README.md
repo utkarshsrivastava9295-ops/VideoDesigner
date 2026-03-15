@@ -18,7 +18,39 @@ npm install
 npm run dev
 ```
 
-Open the URL shown (e.g. `http://localhost:5173`). Use **Chrome** for best compatibility (WebM VP9 recording).
+Open the URL shown (e.g. `http://localhost:5173`). Use **Chrome** or **Edge** for best compatibility (WebCodecs, FFmpeg WASM, WebM/MP4 output).
+
+### AI features (face detection, anime conversion)
+
+For the **Face nod (AI)** and **local anime conversion** features, download the models first:
+
+```bash
+npm run download-models
+```
+
+This downloads face detection and AnimeGAN models into `public/models/`. Without them, those features are disabled.
+
+## Docker
+
+### Quick start (no AI models)
+
+```bash
+docker build -t video-designer .
+docker run -p 8080:80 video-designer
+```
+
+Open `http://localhost:8080`.
+
+### With AI models
+
+To include face detection and AnimeGAN models in the image:
+
+```bash
+docker build -f Dockerfile.models -t video-designer:with-models .
+docker run -p 8080:80 video-designer:with-models
+```
+
+This image is larger but enables **Face nod (AI)** and **local anime conversion** without external CDN calls.
 
 ## Desktop app (Windows)
 
@@ -49,7 +81,7 @@ Creates both an NSIS installer and the portable exe in `release/`.
 3. Select output resolution (1080p or 4K) and click **Generate 60s Video**.
 4. The app records a canvas animation in the browser for 60 seconds and then offers a **Download video** link.
 
-Output is in **WebM** format. You can play it in Chrome or VLC, or convert to MP4 with an online tool if needed.
+Output can be **WebM** (VP8/VP9) or **MP4** (H.264). Choose the format in the Output section. Use **Chrome** or **Edge** for best encoder support; FFmpeg (WASM) works in all supported browsers.
 
 ## Tech stack
 

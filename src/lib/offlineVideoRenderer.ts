@@ -65,16 +65,36 @@ async function blobToUint8Array(blob: Blob): Promise<Uint8Array> {
   return new Uint8Array(ab)
 }
 
+function isWebmFile(file: File): boolean {
+  return file.type === 'video/webm' || file.name.toLowerCase().endsWith('.webm')
+}
+
 function isMp4File(file: File): boolean {
   return file.type === 'video/mp4' || file.name.toLowerCase().endsWith('.mp4')
 }
 
+/** Detect format from file content (magic bytes) — more reliable than type/extension. */
+async function detectVideoFormat(file: File): Promise<'webm' | 'mp4' | 'unknown'> {
+  const buf = await file.slice(0, 12).arrayBuffer()
+  const arr = new Uint8Array(buf)
+  if (arr.length < 8) return 'unknown'
+  // WebM/EBML: 0x1A 0x45 0xDF 0xA3
+  if (arr[0] === 0x1a && arr[1] === 0x45 && arr[2] === 0xdf && arr[3] === 0xa3) return 'webm'
+  // MP4: ftyp at offset 4
+  if (arr[4] === 0x66 && arr[5] === 0x74 && arr[6] === 0x79 && arr[7] === 0x70) return 'mp4'
+  return 'unknown'
+}
+
 export async function ensureWebmVideo(
   file: File,
-  cb: { onStatus?: (msg: string | null) => void; isCancelled?: () => boolean }
+  cb: { onStatus?: (msg: string | null) => void; isCancelled?: () => boolean; convertIfMp4?: boolean }
 ): Promise<Blob> {
-  if (!isMp4File(file)) return file
-  return convertMp4ToWebm(file, { onStatus: cb.onStatus })
+  if (cb.convertIfMp4 === false) return file
+  if (isWebmFile(file)) return file
+  const format = await detectVideoFormat(file)
+  if (format === 'webm') return file
+  if (format !== 'mp4' && !isMp4File(file)) return file
+  return convertMp4ToWebm(file, { onStatus: cb.onStatus, isCancelled: cb.isCancelled })
 }
 
 export type OfflineRenderCallbacks = {
@@ -86,26 +106,40 @@ export type OfflineRenderCallbacks = {
 /** Convert MP4 blob to WebM (VP8/Vorbis) – avoids decode/seek errors with some MP4 files. */
 export async function convertMp4ToWebm(
   mp4Blob: Blob,
-  cb: { onStatus?: (msg: string | null) => void } = {}
+  cb: { onStatus?: (msg: string | null) => void; isCancelled?: () => boolean } = {}
 ): Promise<Blob> {
-  const { onStatus } = cb
+  const { onStatus, isCancelled } = cb
   onStatus?.('Converting MP4 to WebM…')
   console.log('[FFmpeg] Converting MP4 to WebM (input)')
   const ffmpeg = await getFFmpeg()
-  const data = await blobToUint8Array(mp4Blob)
-  await ffmpeg.writeFile('input.mp4', data)
-  const ret = await ffmpeg.exec([
-    '-i', 'input.mp4',
-    '-c:v', 'libvpx',
-    '-c:a', 'libvorbis',
-    '-q:a', '4',
-    'output.webm',
-  ])
-  await ffmpeg.deleteFile('input.mp4').catch(() => {})
-  if (ret !== 0) throw new Error('MP4 to WebM conversion failed')
-  const out = await ffmpeg.readFile('output.webm')
-  await ffmpeg.deleteFile('output.webm').catch(() => {})
-  return new Blob([new Uint8Array(out as Uint8Array)], { type: 'video/webm' })
+  let lastPct = -1
+  const onProgress = (e: { progress: number }) => {
+    const pct = Math.min(99, Math.round(e.progress * 100))
+    if (pct >= lastPct + 10 || pct >= 90) {
+      lastPct = pct
+      onStatus?.(`Converting MP4 to WebM… ${pct}%`)
+    }
+  }
+  ffmpeg.on('progress', onProgress)
+  try {
+    const data = await blobToUint8Array(mp4Blob)
+    await ffmpeg.writeFile('input.mp4', data)
+    if (isCancelled?.()) throw new Error('Cancelled')
+    const ret = await ffmpeg.exec([
+      '-i', 'input.mp4',
+      '-c:v', 'libvpx',
+      '-c:a', 'libvorbis',
+      '-q:a', '4',
+      'output.webm',
+    ])
+    await ffmpeg.deleteFile('input.mp4').catch(() => {})
+    if (ret !== 0) throw new Error('MP4 to WebM conversion failed')
+    const out = await ffmpeg.readFile('output.webm')
+    await ffmpeg.deleteFile('output.webm').catch(() => {})
+    return new Blob([new Uint8Array(out as Uint8Array)], { type: 'video/webm' })
+  } finally {
+    ffmpeg.off('progress', onProgress)
+  }
 }
 
 /** Convert WebM blob to MP4 (H.264/AAC) using FFmpeg. */
@@ -242,7 +276,7 @@ export async function renderVideoOfflineWebm(form: FormData, cb: OfflineRenderCa
 
     if (form.mainMedia?.type === 'video') {
       console.log('[FFmpeg] Loading main video…')
-      mainVideoBlobForAudio = await ensureWebmVideo(form.mainMedia.file, { onStatus, isCancelled })
+      mainVideoBlobForAudio = await ensureWebmVideo(form.mainMedia.file, { onStatus, isCancelled, convertIfMp4: form.convertMp4InputToWebm })
       frontVideoUrl = URL.createObjectURL(mainVideoBlobForAudio)
       frontVideo = document.createElement('video')
       frontVideo.src = frontVideoUrl
@@ -287,7 +321,7 @@ export async function renderVideoOfflineWebm(form: FormData, cb: OfflineRenderCa
 
     if (form.videoFile) {
       console.log('[FFmpeg] Loading background video…')
-      const bgVideoBlob = await ensureWebmVideo(form.videoFile, { onStatus, isCancelled })
+      const bgVideoBlob = await ensureWebmVideo(form.videoFile, { onStatus, isCancelled, convertIfMp4: form.convertMp4InputToWebm })
       backgroundVideoUrl = URL.createObjectURL(bgVideoBlob)
       backgroundVideo = document.createElement('video')
       backgroundVideo.src = backgroundVideoUrl
