@@ -399,6 +399,7 @@ export async function renderVideoWebCodecs(
         audioLevel: pseudoLevel,
         visualizer: form.visualizer,
         backgroundEffect: form.backgroundEffect,
+        particleEffect: form.particleEffect,
         imageOpacityWithEffect: form.imageOpacityWithEffect,
         backgroundVideo: backgroundVideo ?? undefined,
         frontImageOpacityWhenVideo: form.frontImageOpacityWhenVideo,

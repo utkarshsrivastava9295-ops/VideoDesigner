@@ -30,6 +30,21 @@ export interface VideoStyleTheme {
   artistColor: string
   lyricTextColor: string
   artGlowColor: string
+  /** Font family for title (canvas font string) */
+  titleFont: string
+  /** Font family for subtitle/album */
+  subtitleFont: string
+  /** Font family for artist */
+  artistFont: string
+  /** Font for lyrics */
+  lyricFont: string
+  /** Font weight for title: 600, 700, 800, 900 */
+  titleWeight: string
+  /** Font style: normal | italic */
+  titleStyle: string
+  /** Font weight for artist/subtitle */
+  bodyWeight: string
+  bodyStyle: string
 }
 
 export const VIDEO_STYLES: VideoStyleTheme[] = [
@@ -54,6 +69,14 @@ export const VIDEO_STYLES: VideoStyleTheme[] = [
     artistColor: 'rgba(12,12,18,',
     lyricTextColor: 'rgba(255,255,255,0.95)',
     artGlowColor: '34,197,94',
+    titleFont: 'Outfit, system-ui, sans-serif',
+    subtitleFont: 'Outfit, system-ui, sans-serif',
+    artistFont: 'Outfit, system-ui, sans-serif',
+    lyricFont: 'Outfit, system-ui, sans-serif',
+    titleWeight: '700',
+    titleStyle: 'normal',
+    bodyWeight: '600',
+    bodyStyle: 'normal',
   },
   {
     id: 'royal',
@@ -76,10 +99,26 @@ export const VIDEO_STYLES: VideoStyleTheme[] = [
     artistColor: 'rgba(15,12,28,',
     lyricTextColor: 'rgba(255,255,255,0.95)',
     artGlowColor: '139,92,246',
+    titleFont: 'Playfair Display, Georgia, serif',
+    subtitleFont: 'Outfit, system-ui, sans-serif',
+    artistFont: 'Outfit, system-ui, sans-serif',
+    lyricFont: 'Outfit, system-ui, sans-serif',
+    titleWeight: '700',
+    titleStyle: 'italic',
+    bodyWeight: '600',
+    bodyStyle: 'normal',
   },
   {
     id: 'ocean',
     name: 'Ocean Blue',
+    titleFont: 'Outfit, system-ui, sans-serif',
+    subtitleFont: 'Outfit, system-ui, sans-serif',
+    artistFont: 'Outfit, system-ui, sans-serif',
+    lyricFont: 'Outfit, system-ui, sans-serif',
+    titleWeight: '800',
+    titleStyle: 'normal',
+    bodyWeight: '600',
+    bodyStyle: 'normal',
     cardGradientStops: [
       [0, 'rgba(165,216,255,0.98)'],
       [0.25, 'rgba(195,235,255,0.97)'],
@@ -102,6 +141,14 @@ export const VIDEO_STYLES: VideoStyleTheme[] = [
   {
     id: 'sunset',
     name: 'Sunset',
+    titleFont: 'Outfit, system-ui, sans-serif',
+    subtitleFont: 'Outfit, system-ui, sans-serif',
+    artistFont: 'Outfit, system-ui, sans-serif',
+    lyricFont: 'Outfit, system-ui, sans-serif',
+    titleWeight: '700',
+    titleStyle: 'normal',
+    bodyWeight: '600',
+    bodyStyle: 'normal',
     cardGradientStops: [
       [0, 'rgba(254,215,170,0.98)'],
       [0.25, 'rgba(255,235,210,0.97)'],
@@ -142,6 +189,14 @@ export const VIDEO_STYLES: VideoStyleTheme[] = [
     artistColor: 'rgba(148,163,184,',
     lyricTextColor: 'rgba(241,245,249,0.95)',
     artGlowColor: '148,163,184',
+    titleFont: 'Outfit, system-ui, sans-serif',
+    subtitleFont: 'Outfit, system-ui, sans-serif',
+    artistFont: 'Outfit, system-ui, sans-serif',
+    lyricFont: 'Outfit, system-ui, sans-serif',
+    titleWeight: '700',
+    titleStyle: 'normal',
+    bodyWeight: '600',
+    bodyStyle: 'normal',
   },
   {
     id: 'rose',
@@ -164,6 +219,14 @@ export const VIDEO_STYLES: VideoStyleTheme[] = [
     artistColor: 'rgba(20,12,18,',
     lyricTextColor: 'rgba(255,255,255,0.95)',
     artGlowColor: '244,63,94',
+    titleFont: 'Outfit, system-ui, sans-serif',
+    subtitleFont: 'Outfit, system-ui, sans-serif',
+    artistFont: 'Outfit, system-ui, sans-serif',
+    lyricFont: 'Outfit, system-ui, sans-serif',
+    titleWeight: '700',
+    titleStyle: 'italic',
+    bodyWeight: '600',
+    bodyStyle: 'normal',
   },
   {
     id: 'mint',
@@ -186,6 +249,14 @@ export const VIDEO_STYLES: VideoStyleTheme[] = [
     artistColor: 'rgba(12,18,20,',
     lyricTextColor: 'rgba(255,255,255,0.95)',
     artGlowColor: '20,184,166',
+    titleFont: 'Outfit, system-ui, sans-serif',
+    subtitleFont: 'Outfit, system-ui, sans-serif',
+    artistFont: 'Outfit, system-ui, sans-serif',
+    lyricFont: 'Outfit, system-ui, sans-serif',
+    titleWeight: '700',
+    titleStyle: 'normal',
+    bodyWeight: '600',
+    bodyStyle: 'normal',
   },
   {
     id: 'amber',
@@ -208,6 +279,14 @@ export const VIDEO_STYLES: VideoStyleTheme[] = [
     artistColor: 'rgba(20,15,8,',
     lyricTextColor: 'rgba(255,255,255,0.95)',
     artGlowColor: '245,158,11',
+    titleFont: 'Outfit, system-ui, sans-serif',
+    subtitleFont: 'Outfit, system-ui, sans-serif',
+    artistFont: 'Outfit, system-ui, sans-serif',
+    lyricFont: 'Outfit, system-ui, sans-serif',
+    titleWeight: '800',
+    titleStyle: 'normal',
+    bodyWeight: '600',
+    bodyStyle: 'normal',
   },
   {
     id: 'coral',
@@ -230,6 +309,14 @@ export const VIDEO_STYLES: VideoStyleTheme[] = [
     artistColor: 'rgba(22,12,16,',
     lyricTextColor: 'rgba(255,255,255,0.95)',
     artGlowColor: '251,113,133',
+    titleFont: 'Outfit, system-ui, sans-serif',
+    subtitleFont: 'Outfit, system-ui, sans-serif',
+    artistFont: 'Outfit, system-ui, sans-serif',
+    lyricFont: 'Outfit, system-ui, sans-serif',
+    titleWeight: '700',
+    titleStyle: 'normal',
+    bodyWeight: '600',
+    bodyStyle: 'normal',
   },
   {
     id: 'midnight',
@@ -252,9 +339,29 @@ export const VIDEO_STYLES: VideoStyleTheme[] = [
     artistColor: 'rgba(129,140,248,',
     lyricTextColor: 'rgba(255,255,255,0.95)',
     artGlowColor: '129,140,248',
+    titleFont: 'Outfit, system-ui, sans-serif',
+    subtitleFont: 'Outfit, system-ui, sans-serif',
+    artistFont: 'Outfit, system-ui, sans-serif',
+    lyricFont: 'Outfit, system-ui, sans-serif',
+    titleWeight: '700',
+    titleStyle: 'normal',
+    bodyWeight: '600',
+    bodyStyle: 'normal',
   },
 ]
 
+const FONT_DEFAULTS = {
+  titleFont: 'Outfit, system-ui, sans-serif',
+  subtitleFont: 'Outfit, system-ui, sans-serif',
+  artistFont: 'Outfit, system-ui, sans-serif',
+  lyricFont: 'Outfit, system-ui, sans-serif',
+  titleWeight: '700',
+  titleStyle: 'normal',
+  bodyWeight: '600',
+  bodyStyle: 'normal',
+} as const
+
 export function getVideoStyleTheme(id: VideoStyleId): VideoStyleTheme {
-  return VIDEO_STYLES.find((s) => s.id === id) ?? VIDEO_STYLES[0]
+  const s = VIDEO_STYLES.find((x) => x.id === id) ?? VIDEO_STYLES[0]
+  return { ...FONT_DEFAULTS, ...s } as VideoStyleTheme
 }

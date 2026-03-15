@@ -533,6 +533,267 @@ export function drawVisualizer(
       ctx.fill()
       break
     }
+    case 'plasma': {
+      const cx = box.x + boxW / 2
+      const cy = box.y + boxH / 2
+      const grid = 20
+      for (let iy = 0; iy < grid; iy++) {
+        for (let ix = 0; ix < grid; ix++) {
+          const x = box.x + (ix / (grid - 1)) * boxW
+          const y = box.y + (iy / (grid - 1)) * boxH
+          const dx = (x - cx) / boxW
+          const dy = (y - cy) / boxH
+          const v = (0.5 + 0.5 * Math.sin(dx * 8 + timeMs / 80)) * (0.5 + 0.5 * Math.sin(dy * 6 + timeMs / 100))
+          const idx = (ix + iy) % N
+          const bar = getBar(idx)
+          const hue = ((timeMs / 30 + idx * 15) % 360)
+          const [rr, gg, bb] = hsl(hue, 0.9, 0.55)
+          ctx.fillStyle = `rgba(${rr},${gg},${bb},${alpha(0.2 + 0.6 * v * (0.5 + bar))})`
+          ctx.fillRect(x - 3, y - 3, 6, 6)
+        }
+      }
+      break
+    }
+    case 'fireflies': {
+      const cx = box.x + boxW / 2
+      const cy = box.y + boxH / 2
+      const count = 35
+      for (let i = 0; i < count; i++) {
+        const phase = (i / count) * Math.PI * 2 + timeMs / 800
+        const radius = Math.min(boxW, boxH) * (0.15 + 0.35 * (0.5 + 0.5 * Math.sin(phase * 2)))
+        const x = cx + Math.cos(phase) * radius
+        const y = cy + Math.sin(phase * 0.7) * radius * 0.6
+        const v = getBar(Math.floor((i / count) * N) % N)
+        const pulse = 0.4 + 0.6 * (0.5 + 0.5 * Math.sin(timeMs / 200 + i * 0.5))
+        const size = 4 + v * 10
+        const [rr, gg, bb] = hsl(45 + (i % 5) * 10, 1, 0.6)
+        ctx.save()
+        ctx.shadowColor = `rgba(${rr},${gg},${bb},0.9)`
+        ctx.shadowBlur = 15
+        ctx.fillStyle = `rgba(255,255,200,${alpha(pulse * (0.6 + 0.4 * v))})`
+        ctx.beginPath()
+        ctx.arc(x, y, size, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.restore()
+      }
+      break
+    }
+    case 'spectrum': {
+      const cy = box.y + boxH / 2
+      const amp = boxH * 0.45
+      const bandCount = 32
+      for (let i = 0; i < bandCount; i++) {
+        const idx = Math.floor((i / bandCount) * N)
+        const v = getBar(idx)
+        const x = box.x + (i / (bandCount - 1)) * boxW
+        const hue = (i / bandCount) * 280 + (timeMs / 40) % 80
+        const [rr, gg, bb] = hsl(hue, 1, 0.55)
+        const h = amp * (0.15 + 0.85 * v) * (0.8 + 0.2 * Math.sin(timeMs / 100 + i * 0.3))
+        const grad = ctx.createLinearGradient(x, cy - h, x, cy + h)
+        grad.addColorStop(0, `rgba(${rr},${gg},${bb},0)`)
+        grad.addColorStop(0.3, `rgba(${rr},${gg},${bb},${alpha(0.7 * v)})`)
+        grad.addColorStop(0.5, `rgba(${rr},${gg},${bb},${alpha(0.9 * v)})`)
+        grad.addColorStop(0.7, `rgba(${rr},${gg},${bb},${alpha(0.7 * v)})`)
+        grad.addColorStop(1, `rgba(${rr},${gg},${bb},0)`)
+        ctx.fillStyle = grad
+        ctx.fillRect(x - 2, cy - h, 4, h * 2)
+      }
+      break
+    }
+    case 'matrixRain': {
+      const cols = 14
+      const cellW = boxW / cols
+      for (let c = 0; c < cols; c++) {
+        const x = box.x + c * cellW + cellW / 2
+        const offset = (timeMs / 80 + c * 50) % (boxH + 60)
+        for (let row = 0; row < 8; row++) {
+          const y = box.y + boxH - offset + row * 18
+          if (y < box.y - 10 || y > box.y + boxH + 10) continue
+          const idx = (c + row) % N
+          const v = getBar(idx)
+          const fade = 1 - row / 8
+          const [rr, gg, bb] = hsl(120, 1, 0.5 + 0.2 * v)
+          ctx.fillStyle = `rgba(${rr},${gg},${bb},${alpha(0.3 + 0.7 * fade * v)})`
+          ctx.font = `600 ${12 + v * 4}px monospace`
+          ctx.fillText(String.fromCharCode(0x30a0 + Math.floor((timeMs / 30 + c) % 96)), x, y)
+        }
+      }
+      break
+    }
+    case 'lightning': {
+      const numBolt = 5
+      for (let b = 0; b < numBolt; b++) {
+        const baseX = box.x + (b + 1) / (numBolt + 1) * boxW
+        const v = getBar(Math.floor((b / numBolt) * N))
+        const intensity = 0.3 + 0.7 * v + 0.3 * level
+        if (intensity < 0.5) continue
+        ctx.save()
+        ctx.strokeStyle = `rgba(255,255,255,${alpha(intensity)})`
+        ctx.lineWidth = lw(2)
+        ctx.shadowColor = 'rgba(200,220,255,0.9)'
+        ctx.shadowBlur = 12
+        ctx.beginPath()
+        ctx.moveTo(baseX, box.y)
+        let lx = baseX
+        let ly = box.y
+        const segs = 8
+        for (let s = 0; s < segs; s++) {
+          const jitter = (Math.sin(timeMs / 50 + b * 3) * 15 + (s % 2) * 20)
+          lx = baseX + jitter * (s % 2 === 0 ? 1 : -1)
+          ly = box.y + (s + 1) / segs * boxH
+          ctx.lineTo(lx, ly)
+        }
+        ctx.stroke()
+        ctx.restore()
+      }
+      break
+    }
+    case 'prism': {
+      const cx = box.x + boxW / 2
+      const cy = box.y + boxH / 2
+      const maxR = Math.min(boxW, boxH) * 0.45
+      const rays = 16
+      for (let i = 0; i < rays; i++) {
+        const angle = (i / rays) * Math.PI * 2 - Math.PI / 2 + timeMs / 600
+        const v = getBar(Math.floor((i / rays) * N) % N)
+        const len = maxR * (0.3 + 0.7 * v)
+        const hue = (i / rays) * 360 + (timeMs / 60) % 60
+        const [rr, gg, bb] = hsl(hue, 1, 0.6)
+        ctx.save()
+        ctx.translate(cx, cy)
+        ctx.rotate(angle)
+        const grad = ctx.createLinearGradient(0, 0, len, 0)
+        grad.addColorStop(0, `rgba(${rr},${gg},${bb},0)`)
+        grad.addColorStop(0.5, `rgba(${rr},${gg},${bb},${alpha(0.8 * v)})`)
+        grad.addColorStop(1, `rgba(${rr},${gg},${bb},0)`)
+        ctx.strokeStyle = grad
+        ctx.lineWidth = lw(4)
+        ctx.lineCap = 'round'
+        ctx.beginPath()
+        ctx.moveTo(0, 0)
+        ctx.lineTo(len, 0)
+        ctx.stroke()
+        ctx.restore()
+      }
+      ctx.beginPath()
+      ctx.arc(cx, cy, maxR * 0.12, 0, Math.PI * 2)
+      ctx.fillStyle = `rgba(255,255,255,${alpha(0.9)})`
+      ctx.fill()
+      break
+    }
+    case 'heartbeat': {
+      const cy = box.y + boxH / 2
+      const amp = boxH * 0.4
+      const pulse = 0.5 + 0.5 * Math.sin(timeMs / 400)
+      const beat = level > 0.3 ? 1 + 0.15 * Math.sin(timeMs / 150) : 1
+      ctx.beginPath()
+      for (let i = 0; i <= N; i++) {
+        const x = box.x + (i / N) * boxW
+        const v = getBar(i % N)
+        const wave = Math.sin(i * 0.15 + timeMs / 200) * 0.2
+        const y = cy - (v * amp * beat * (0.7 + 0.3 * pulse) + wave * amp)
+        if (i === 0) ctx.moveTo(x, y)
+        else ctx.lineTo(x, y)
+      }
+      ctx.strokeStyle = `rgba(${r},${g},${b},${alpha(0.8 + 0.2 * level)})`
+      ctx.lineWidth = lw(4)
+      ctx.lineCap = 'round'
+      ctx.lineJoin = 'round'
+      ctx.stroke()
+      ctx.beginPath()
+      for (let i = 0; i <= N; i++) {
+        const x = box.x + (i / N) * boxW
+        const v = getBar(i % N)
+        const wave = Math.sin(i * 0.15 + timeMs / 200) * 0.2
+        ctx.lineTo(x, cy + (v * amp * beat * (0.7 + 0.3 * pulse) + wave * amp))
+      }
+      ctx.closePath()
+      ctx.fillStyle = `rgba(${r},${g},${b},${alpha(0.15 + 0.25 * level)})`
+      ctx.fill()
+      break
+    }
+    case 'galaxy': {
+      const cx = box.x + boxW / 2
+      const cy = box.y + boxH / 2
+      const maxR = Math.min(boxW, boxH) * 0.48
+      const arms = 4
+      const stars = 80
+      const spin = (timeMs / 2000) * Math.PI * 2
+      for (let i = 0; i < stars; i++) {
+        const arm = i % arms
+        const dist = maxR * (0.2 + 0.8 * ((i / stars) ** 0.6))
+        const angle = (arm / arms) * Math.PI * 2 + spin + (i / stars) * Math.PI * 4
+        const v = getBar(Math.floor((i / stars) * N) % N)
+        const x = cx + Math.cos(angle) * dist * (0.9 + 0.1 * Math.sin(timeMs / 100 + i))
+        const y = cy + Math.sin(angle) * dist * 0.6 * (0.9 + 0.1 * Math.sin(timeMs / 120 + i * 0.7))
+        const size = 2 + v * 6
+        const [rr, gg, bb] = hsl(260 + (i % 3) * 30, 0.8, 0.65)
+        ctx.fillStyle = `rgba(${rr},${gg},${bb},${alpha(0.4 + 0.6 * v)})`
+        ctx.beginPath()
+        ctx.arc(x, y, size, 0, Math.PI * 2)
+        ctx.fill()
+      }
+      ctx.beginPath()
+      ctx.arc(cx, cy, maxR * 0.08, 0, Math.PI * 2)
+      const coreGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, maxR * 0.2)
+      coreGrad.addColorStop(0, `rgba(255,255,255,${alpha(0.6 + 0.3 * level)})`)
+      coreGrad.addColorStop(0.5, `rgba(${r},${g},${b},${alpha(0.3)})`)
+      coreGrad.addColorStop(1, 'rgba(0,0,0,0)')
+      ctx.fillStyle = coreGrad
+      ctx.fill()
+      break
+    }
+    case 'meteor': {
+      const cy = box.y + boxH / 2
+      const count = 12
+      for (let i = 0; i < count; i++) {
+        const trail = (timeMs / 120 + i * 80) % (boxW + 100)
+        const x = box.x + boxW - trail
+        const v = getBar(Math.floor((i / count) * N) % N)
+        const grad = ctx.createLinearGradient(x, cy, x + 60, cy)
+        grad.addColorStop(0, `rgba(${r},${g},255,${alpha(0.9 * v)})`)
+        grad.addColorStop(0.3, `rgba(${r},${g},255,${alpha(0.5 * v)})`)
+        grad.addColorStop(0.7, `rgba(${r},${g},255,0.1)`)
+        grad.addColorStop(1, 'rgba(255,255,255,0)')
+        ctx.fillStyle = grad
+        ctx.beginPath()
+        ctx.moveTo(x, cy)
+        ctx.lineTo(x + 70, cy - 8)
+        ctx.lineTo(x + 80, cy)
+        ctx.lineTo(x + 70, cy + 8)
+        ctx.closePath()
+        ctx.fill()
+      }
+      break
+    }
+    case 'laser': {
+      const cy = box.y + boxH / 2
+      const beams = 8
+      for (let i = 0; i < beams; i++) {
+        const v = getBar(Math.floor((i / beams) * N) % N)
+        const x = box.x + (i + 1) / (beams + 1) * boxW
+        const sweep = Math.sin(timeMs / 300 + i * 0.5) * boxH * 0.4
+        const hue = 320 + (i / beams) * 40 + (timeMs / 50) % 40
+        const [rr, gg, bb] = hsl(hue, 1, 0.6)
+        ctx.save()
+        ctx.shadowColor = `rgba(${rr},${gg},${bb},0.95)`
+        ctx.shadowBlur = 20
+        const grad = ctx.createLinearGradient(x, cy - boxH / 2, x, cy + boxH / 2)
+        grad.addColorStop(0, 'rgba(255,255,255,0)')
+        grad.addColorStop(0.4, `rgba(${rr},${gg},${bb},${alpha(0.3 * v)})`)
+        grad.addColorStop(0.5, `rgba(${rr},${gg},${bb},${alpha(0.9 * v)})`)
+        grad.addColorStop(0.6, `rgba(${rr},${gg},${bb},${alpha(0.3 * v)})`)
+        grad.addColorStop(1, 'rgba(255,255,255,0)')
+        ctx.strokeStyle = grad
+        ctx.lineWidth = lw(3)
+        ctx.beginPath()
+        ctx.moveTo(x, cy - sweep)
+        ctx.lineTo(x, cy + sweep)
+        ctx.stroke()
+        ctx.restore()
+      }
+      break
+    }
     default:
       break
   }
