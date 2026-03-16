@@ -13,6 +13,12 @@ export type CardStyleId =
   | 'float'
   | 'minimal'
   | 'neon'
+  | 'split'
+  | 'cornerExpand'
+  | 'gradientBorder'
+  | 'diagonal'
+  | 'spotlight'
+  | 'ribbon'
   | 'none'
 
 export interface CardStyleOption {
@@ -32,6 +38,12 @@ export const CARD_STYLES: CardStyleOption[] = [
   { id: 'float', name: 'Float', description: 'Card fades in and floats gently' },
   { id: 'minimal', name: 'Minimal', description: 'Thin line expands into the card' },
   { id: 'neon', name: 'Neon', description: 'Neon glow border fades in' },
+  { id: 'split', name: 'Split', description: 'Card splits apart and joins in' },
+  { id: 'cornerExpand', name: 'Corner', description: 'Expands from bottom-left corner' },
+  { id: 'gradientBorder', name: 'Gradient Border', description: 'Animated gradient outline reveal' },
+  { id: 'diagonal', name: 'Diagonal', description: 'Sweeps in diagonally from corner' },
+  { id: 'spotlight', name: 'Spotlight', description: 'Reveals like a spotlight sweep' },
+  { id: 'ribbon', name: 'Ribbon', description: 'Ribbon curls up from below' },
   { id: 'none', name: 'None', description: 'No card – video and effects only' },
 ]
 
@@ -221,6 +233,104 @@ export function getCardAnimation(
         radius: 24,
         useGlass: false,
         useNeon: true,
+      }
+    }
+    case 'split': {
+      const splitEase = easeOutCubic(Math.min(1, timeMs / 950))
+      const scaleVal = 0.05 + 0.95 * splitEase
+      return {
+        drawX: cardX,
+        drawY: cardYBase,
+        cardW,
+        cardH: baseCardH,
+        scale: scaleVal,
+        alpha: splitEase,
+        radius: 20,
+        useGlass: false,
+        useNeon: false,
+      }
+    }
+    case 'cornerExpand': {
+      const cornerEase = easeOutCubic(Math.min(1, timeMs / 1100))
+      const startW = cardW * 0.15
+      const startH = baseCardH * 0.2
+      const drawW = startW + (cardW - startW) * cornerEase
+      const drawH = startH + (baseCardH - startH) * cornerEase
+      return {
+        drawX: margin,
+        drawY: height - drawH - cardMarginBottom,
+        cardW: drawW,
+        cardH: drawH,
+        scale: 1,
+        alpha: cornerEase,
+        radius: Math.min(20, drawH / 2, drawW / 2),
+        useGlass: false,
+        useNeon: false,
+      }
+    }
+    case 'gradientBorder': {
+      const borderEase = easeOutCubic(Math.min(1, timeMs / 1000))
+      const shrink = (1 - borderEase) * 12
+      return {
+        drawX: cardX - shrink,
+        drawY: cardYBase - shrink,
+        cardW: cardW + shrink * 2,
+        cardH: baseCardH + shrink * 2,
+        scale: 1,
+        alpha: borderEase,
+        radius: 28,
+        useGlass: false,
+        useNeon: true,
+      }
+    }
+    case 'diagonal': {
+      const diagEase = easeOutCubic(Math.min(1, timeMs / 900))
+      const startX = cardX + cardW + 100
+      const startY = height + 80
+      const drawX = startX + (cardX - startX) * diagEase
+      const drawY = startY + (cardYBase - startY) * diagEase
+      return {
+        drawX,
+        drawY,
+        cardW,
+        cardH: baseCardH,
+        scale: diagEase,
+        alpha: diagEase,
+        radius: 22,
+        useGlass: false,
+        useNeon: false,
+      }
+    }
+    case 'spotlight': {
+      const spotEase = easeOutCubic(Math.min(1, timeMs / 1000))
+      return {
+        drawX: cardX,
+        drawY: cardYBase,
+        cardW,
+        cardH: baseCardH,
+        scale: 1,
+        alpha: Math.min(1, spotEase * 1.2),
+        radius: 24,
+        useGlass: false,
+        useNeon: false,
+      }
+    }
+    case 'ribbon': {
+      const ribbonEase = easeOutCubic(Math.min(1, timeMs / 1050))
+      const curl = Math.sin(ribbonEase * Math.PI) * 0.15
+      const drawH = baseCardH * (0.2 + 0.8 * ribbonEase)
+      const drawY = height - drawH - cardMarginBottom
+      const sway = Math.sin(timeMs / 400) * 3
+      return {
+        drawX: cardX + sway,
+        drawY: drawY,
+        cardW,
+        cardH: drawH,
+        scale: 1 + curl,
+        alpha: ribbonEase,
+        radius: Math.min(18, drawH / 2),
+        useGlass: false,
+        useNeon: false,
       }
     }
     case 'none': {

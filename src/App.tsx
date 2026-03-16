@@ -13,6 +13,8 @@ import type { VisualizerId } from './lib/videoVisualizers'
 import { VIDEO_VISUALIZERS } from './lib/videoVisualizers'
 import type { BackgroundEffectId } from './lib/videoBackgroundEffects'
 import { BACKGROUND_EFFECTS } from './lib/videoBackgroundEffects'
+import type { ParticleEffectId } from './lib/videoParticleEffects'
+import { PARTICLE_EFFECTS } from './lib/videoParticleEffects'
 import type { CardStyleId } from './lib/cardStyles'
 import { CARD_STYLES } from './lib/cardStyles'
 import type { VideoAnimationId } from './lib/canvasRenderer'
@@ -61,6 +63,8 @@ export type FormData = {
   style: VideoStyleId
   visualizer: VisualizerId
   backgroundEffect: BackgroundEffectId
+  /** Separate 3D particle overlay (spheres, confetti, hearts, etc.) */
+  particleEffect: ParticleEffectId
   /** 0.5 | 0.75 | 1 – image opacity when a background effect is active (home selector) */
   imageOpacityWithEffect: number
   /** Optional background video (loops behind image) */
@@ -127,6 +131,7 @@ const initialForm: FormData = {
   style: 'fresh',
   visualizer: 'bars',
   backgroundEffect: 'none',
+  particleEffect: 'none',
   imageOpacityWithEffect: 0.75,
   videoFile: null,
   frontImageOpacityWhenVideo: 0.7,
@@ -568,7 +573,7 @@ export default function App() {
               >
                 <h3 className="text-lg font-semibold text-slate-200 mb-3">Card style</h3>
                 <p className="text-slate-500 text-sm mb-3">How the info card appears and animates on the video.</p>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
                   {CARD_STYLES.map((c) => (
                     <button
                       key={c.id}
@@ -684,7 +689,7 @@ export default function App() {
                 <div className="space-y-6">
                   <div>
                     <p className="text-slate-400 text-sm font-medium mb-2">Linear</p>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 gap-2">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 max-h-40 overflow-y-auto">
                       {VIDEO_VISUALIZERS.filter((v) => v.group === 'linear').map((v) => (
                         <button
                           key={v.id}
@@ -703,7 +708,7 @@ export default function App() {
                   </div>
                   <div>
                     <p className="text-slate-400 text-sm font-medium mb-2">Circular</p>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 gap-2">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 max-h-40 overflow-y-auto">
                       {VIDEO_VISUALIZERS.filter((v) => v.group === 'circular').map((v) => (
                         <button
                           key={v.id}
@@ -771,12 +776,12 @@ export default function App() {
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.195 }}
+                transition={{ delay: 0.194 }}
                 className="rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm p-6"
               >
                 <h3 className="text-lg font-semibold text-slate-200 mb-2">Background effect</h3>
-                <p className="text-slate-500 text-sm mb-3">Animated layer over the video (fire, snow, fog, etc.) with low opacity.</p>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <p className="text-slate-500 text-sm mb-3">Atmospheric overlay (fire, snow, fog, rain, etc.) with low opacity.</p>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 max-h-64 overflow-y-auto">
                   {BACKGROUND_EFFECTS.map((e) => (
                     <button
                       key={e.id}
@@ -810,6 +815,33 @@ export default function App() {
                       }`}
                     >
                       {label}
+                    </button>
+                  ))}
+                </div>
+              </motion.div>
+
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.196 }}
+                className="rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm p-6"
+              >
+                <h3 className="text-lg font-semibold text-slate-200 mb-2">Particles</h3>
+                <p className="text-slate-500 text-sm mb-3">3D-style floating particles with depth, perspective, and shadows. Rendered in a separate layer for a polished look.</p>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                  {PARTICLE_EFFECTS.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => setForm((f) => ({ ...f, particleEffect: p.id }))}
+                      className={`flex flex-col gap-0.5 p-3 rounded-xl border-2 text-left transition ${
+                        form.particleEffect === p.id
+                          ? 'border-violet-500 bg-violet-500/15'
+                          : 'border-white/10 bg-white/5 hover:border-white/20'
+                      }`}
+                    >
+                      <span className="text-sm font-medium text-slate-200">{p.name}</span>
+                      {p.description && <span className="text-xs text-slate-500">{p.description}</span>}
                     </button>
                   ))}
                 </div>

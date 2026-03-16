@@ -445,6 +445,7 @@ export async function renderVideoOfflineWebm(form: FormData, cb: OfflineRenderCa
           audioLevel: pseudoLevel,
           visualizer: form.visualizer,
           backgroundEffect: form.backgroundEffect,
+          particleEffect: form.particleEffect,
           imageOpacityWithEffect: form.imageOpacityWithEffect,
           backgroundVideo: backgroundVideo ?? undefined,
           frontImageOpacityWhenVideo: form.frontImageOpacityWhenVideo,

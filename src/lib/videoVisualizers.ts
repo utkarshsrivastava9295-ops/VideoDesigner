@@ -29,6 +29,16 @@ export type VisualizerId =
   | 'vortex'
   | 'neonRing'
   | 'crystalOrb'
+  | 'plasma'
+  | 'fireflies'
+  | 'spectrum'
+  | 'matrixRain'
+  | 'lightning'
+  | 'prism'
+  | 'heartbeat'
+  | 'galaxy'
+  | 'meteor'
+  | 'laser'
 
 export interface VideoVisualizer {
   id: VisualizerId
@@ -62,6 +72,17 @@ export const VIDEO_VISUALIZERS: VideoVisualizer[] = [
   { id: 'vortex', name: 'Vortex', group: 'circular' },
   { id: 'neonRing', name: 'Neon Ring', group: 'circular' },
   { id: 'crystalOrb', name: 'Crystal Orb', group: 'circular' },
+  // New: super animated
+  { id: 'plasma', name: 'Plasma', group: 'linear' },
+  { id: 'fireflies', name: 'Fireflies', group: 'circular' },
+  { id: 'spectrum', name: 'Spectrum', group: 'linear' },
+  { id: 'matrixRain', name: 'Matrix Rain', group: 'linear' },
+  { id: 'lightning', name: 'Lightning', group: 'linear' },
+  { id: 'prism', name: 'Prism', group: 'circular' },
+  { id: 'heartbeat', name: 'Heartbeat', group: 'linear' },
+  { id: 'galaxy', name: 'Galaxy', group: 'circular' },
+  { id: 'meteor', name: 'Meteor', group: 'linear' },
+  { id: 'laser', name: 'Laser', group: 'linear' },
 ]
 
 export function getVisualizer(id: VisualizerId): VideoVisualizer {

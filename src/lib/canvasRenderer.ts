@@ -10,6 +10,8 @@ import type { VisualizerId } from './videoVisualizers'
 import { drawVisualizer } from './drawVisualizers'
 import type { BackgroundEffectId } from './videoBackgroundEffects'
 import { drawBackgroundEffect } from './drawBackgroundEffects'
+import type { ParticleEffectId } from './videoParticleEffects'
+import { drawParticleEffect } from './drawParticleEffects'
 import type { CardStyleId } from './cardStyles'
 import { getCardAnimation, CARD_ENTRANCE_MS } from './cardStyles'
 
@@ -151,6 +153,7 @@ export function drawFrame(
     audioLevel?: number
     visualizer?: VisualizerId
     backgroundEffect?: BackgroundEffectId
+    particleEffect?: ParticleEffectId
     imageOpacityWithEffect?: number
     /** When set, drawn first (looping); then front image uses frontImageOpacityWhenVideo */
     backgroundVideo?: HTMLVideoElement | null
@@ -182,7 +185,7 @@ export function drawFrame(
     drawInstrumentalFrame(ctx, opts)
     return
   }
-  const { width, height, timeMs, durationMs, style, image, frontVideo, title, artist, album, lyricsLines, spectrumBars, audioLevel, visualizer, backgroundEffect, imageOpacityWithEffect, backgroundVideo, frontImageOpacityWhenVideo, visualizerSize, visualizerPosition, cardStyle, cardAutoHideSeconds, slideshowImages, slideshowCurrentIndex = 0, slideshowTransitionProgress = 0, slideshowTransition = 'fade', slideshowSlideDurationMs, videoAnimation: videoAnimationOpt = 'kenBurns', faceBox, animeFrames } = opts
+  const { width, height, timeMs, durationMs, style, image, frontVideo, title, artist, album, lyricsLines, spectrumBars, audioLevel, visualizer, backgroundEffect, particleEffect, imageOpacityWithEffect, backgroundVideo, frontImageOpacityWhenVideo, visualizerSize, visualizerPosition, cardStyle, cardAutoHideSeconds, slideshowImages, slideshowCurrentIndex = 0, slideshowTransitionProgress = 0, slideshowTransition = 'fade', slideshowSlideDurationMs, videoAnimation: videoAnimationOpt = 'kenBurns', faceBox, animeFrames } = opts
   const videoAnimation = videoAnimationOpt ?? 'kenBurns'
   const hasSlideshow = slideshowImages && slideshowImages.length > 0
   const hasImage = !!(image && image.complete && image.naturalWidth > 0)
@@ -352,6 +355,8 @@ export function drawFrame(
 
   // —— Background effect (fire/snow/fog etc.) over the video with low opacity ——
   drawBackgroundEffect(ctx, backgroundEffect ?? 'none', width, height, timeMs)
+  // —— 3D particles (separate layer with depth, perspective, shadows) ——
+  drawParticleEffect(ctx, particleEffect ?? 'none', width, height, timeMs)
 
   const margin = width * 0.04
   const hasLyrics = lyricsLines.length > 0
@@ -609,8 +614,8 @@ export function drawFrame(
   const titleMaxWidth = detailsWidth - pad * 2
   const titleSizeMin = Math.round(Math.min(width, height) * 0.028)
   const titleSizeMax = Math.round(Math.min(width, height) * 0.062)
-  const titleSize = getTitleFontSize(ctx, title, titleMaxWidth, titleSizeMax, titleSizeMin)
-  ctx.font = `700 ${titleSize}px Outfit, system-ui, sans-serif`
+  const titleSize = getTitleFontSize(ctx, title, titleMaxWidth, titleSizeMax, titleSizeMin, theme)
+  ctx.font = `${theme.titleStyle} ${theme.titleWeight} ${titleSize}px ${theme.titleFont}`
   ctx.textAlign = 'left'
   ctx.textBaseline = 'middle'
   ctx.fillStyle = `${theme.titleColor}${titleAlpha})`
@@ -618,7 +623,7 @@ export function drawFrame(
   textY += titleSize * 1.35
 
   const subSize = Math.round(Math.min(width, height) * 0.038)
-  ctx.font = `600 ${subSize}px Outfit, system-ui, sans-serif`
+  ctx.font = `${theme.bodyStyle} ${theme.bodyWeight} ${subSize}px ${theme.subtitleFont}`
   ctx.fillStyle = `${theme.subtitleColor}${albumAlpha})`
   if (album) {
     wrapAndDraw(ctx, `Album: ${album}`, contentLeft + pad, textY, detailsWidth - pad * 2, subSize * 1.2)
@@ -629,12 +634,12 @@ export function drawFrame(
 
   const labelSize = Math.round(subSize * 0.85)
   const artistNameSize = Math.round(subSize * 1.05)
-  ctx.font = `600 ${labelSize}px Outfit, system-ui, sans-serif`
+  ctx.font = `${theme.bodyStyle} ${theme.bodyWeight} ${labelSize}px ${theme.artistFont}`
   ctx.fillStyle = `${theme.artistColor}${artistAlpha})`
   ctx.fillText('Artist', contentLeft + pad, textY)
   textY += labelSize * 1.4
   if (artist) {
-    ctx.font = `600 ${artistNameSize}px Outfit, system-ui, sans-serif`
+    ctx.font = `${theme.bodyStyle} ${theme.bodyWeight} ${artistNameSize}px ${theme.artistFont}`
     ctx.fillStyle = `${theme.artistColor}${artistAlpha})`
     ctx.fillText(artist, contentLeft + pad, textY)
   }
@@ -689,7 +694,7 @@ export function drawFrame(
     ctx.save()
     roundRect(ctx, lyricBoxLeft, lyricBoxY, lyricBoxW, lyricBoxH, 14)
     ctx.clip()
-    ctx.font = `500 ${lyricFontSize}px Outfit, system-ui, sans-serif`
+    ctx.font = `${theme.bodyStyle} 500 ${lyricFontSize}px ${theme.lyricFont}`
     ctx.fillStyle = theme.lyricTextColor
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
@@ -721,7 +726,7 @@ export function drawFrame(
 type InstrumentalOpts = Parameters<typeof drawFrame>[1]
 
 function drawInstrumentalFrame(ctx: CanvasRenderingContext2D, opts: InstrumentalOpts) {
-  const { width: w, height: h, timeMs, style, image, frontVideo, title, artist, spectrumBars, audioLevel, visualizer, backgroundEffect, backgroundVideo, slideshowImages, slideshowCurrentIndex = 0, videoAnimation = 'kenBurns', animeFrames } = opts
+  const { width: w, height: h, timeMs, style, image, frontVideo, title, artist, spectrumBars, audioLevel, visualizer, backgroundEffect, particleEffect, backgroundVideo, slideshowImages, slideshowCurrentIndex = 0, videoAnimation = 'kenBurns', animeFrames } = opts
   const hasAnimeFrames = animeFrames?.images?.length
   const hasFrontVideo = (frontVideo && frontVideo.readyState >= 1 && frontVideo.videoWidth > 0 && frontVideo.videoHeight > 0) || !!hasAnimeFrames
   const hasSlideshow = slideshowImages && slideshowImages.length > 0
@@ -791,6 +796,10 @@ function drawInstrumentalFrame(ctx: CanvasRenderingContext2D, opts: Instrumental
     ctx.globalAlpha = 0.35
     drawBackgroundEffect(ctx, backgroundEffect, w, h, timeMs)
     ctx.restore()
+  }
+  // 3D particles
+  if (particleEffect && particleEffect !== 'none') {
+    drawParticleEffect(ctx, particleEffect, w, h, timeMs)
   }
 
   // Cover animation: respect videoAnimation (use none when selected)
@@ -916,12 +925,12 @@ function drawInstrumentalFrame(ctx: CanvasRenderingContext2D, opts: Instrumental
   const textY = h - vizH - h * 0.12
   const titleSize = Math.round(Math.min(w, h) * 0.042)
   const artistSize = Math.round(Math.min(w, h) * 0.028)
-  ctx.font = `600 ${titleSize}px Outfit, system-ui, sans-serif`
+  ctx.font = `${theme.bodyStyle ?? 'normal'} ${theme.bodyWeight ?? '600'} ${titleSize}px ${theme.titleFont ?? 'Outfit, system-ui, sans-serif'}`
   ctx.textAlign = 'left'
   ctx.textBaseline = 'middle'
   ctx.fillStyle = `rgba(255,255,255,${0.92 + 0.08 * Math.sin(t * 0.5)})`
   if (title.trim()) ctx.fillText(title, textPad, textY)
-  ctx.font = `500 ${artistSize}px Outfit, system-ui, sans-serif`
+  ctx.font = `${theme.bodyStyle ?? 'normal'} 500 ${artistSize}px ${theme.artistFont ?? 'Outfit, system-ui, sans-serif'}`
   ctx.fillStyle = 'rgba(255,255,255,0.6)'
   if (artist.trim()) ctx.fillText(artist, textPad, textY + titleSize * 1.1)
 }
@@ -1123,13 +1132,16 @@ function getTitleFontSize(
   title: string,
   maxWidth: number,
   sizeMax: number,
-  sizeMin: number
+  sizeMin: number,
+  theme: { titleWeight?: string; titleFont?: string }
 ): number {
   if (!title.trim()) return sizeMax
-  ctx.font = `700 ${sizeMax}px Outfit, system-ui, sans-serif`
-  const w = ctx.measureText(title).width
-  if (w <= maxWidth) return sizeMax
-  const scale = maxWidth / w
+  const weight = theme?.titleWeight ?? '700'
+  const font = theme?.titleFont ?? 'Outfit, system-ui, sans-serif'
+  ctx.font = `normal ${weight} ${sizeMax}px ${font}`
+  const measuredW = ctx.measureText(title).width
+  if (measuredW <= maxWidth) return sizeMax
+  const scale = maxWidth / measuredW
   const size = Math.round(sizeMax * scale)
   return Math.max(sizeMin, Math.min(sizeMax, size))
 }
