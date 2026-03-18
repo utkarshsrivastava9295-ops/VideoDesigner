@@ -1,5 +1,6 @@
 import type { FormData, VideoOrientationId } from '../App'
 import { drawFrame, loadImage, SLIDESHOW_TRANSITION_IDS } from './canvasRenderer'
+import { resolveLyricsForRender } from './lyricSync'
 import { detectFaceInImage, detectFacesInImages, type FaceBox } from './faceDetection'
 import { convertImageToAnime, isAnimeConversionAvailable } from './animeConversion'
 import { seekVideo } from './videoSeek'
@@ -165,6 +166,34 @@ export async function convertWebmToMp4(
   const out = await ffmpeg.readFile('output.mp4')
   await ffmpeg.deleteFile('output.mp4').catch(() => {})
   return new Blob([new Uint8Array(out as Uint8Array)], { type: 'video/mp4' })
+}
+
+/** Extract audio from video file for lyric extraction (Whisper). Returns WAV File. */
+export async function extractAudioFromVideo(
+  videoFile: File,
+  cb: { onStatus?: (msg: string | null) => void } = {}
+): Promise<File> {
+  const { onStatus } = cb
+  onStatus?.('Extracting audio from video…')
+  const ffmpeg = await getFFmpeg()
+  const format = await detectVideoFormat(videoFile)
+  const ext = format === 'webm' ? 'webm' : 'mp4'
+  const inputName = `video_in.${ext}`
+  const data = await blobToUint8Array(videoFile)
+  await ffmpeg.writeFile(inputName, data)
+  const ret = await ffmpeg.exec([
+    '-i', inputName,
+    '-vn',
+    '-acodec', 'pcm_s16le',
+    '-ar', '16000',
+    '-ac', '1',
+    'audio_out.wav',
+  ])
+  await ffmpeg.deleteFile(inputName).catch(() => {})
+  if (ret !== 0) throw new Error('Could not extract audio from video')
+  const out = await ffmpeg.readFile('audio_out.wav')
+  await ffmpeg.deleteFile('audio_out.wav').catch(() => {})
+  return new File([new Uint8Array(out as Uint8Array)], 'audio.wav', { type: 'audio/wav' })
 }
 
 /** Max frames in FFmpeg's virtual FS at once. VP8 uses less memory than VP9. */
@@ -338,9 +367,24 @@ export async function renderVideoOfflineWebm(form: FormData, cb: OfflineRenderCa
       console.log('[FFmpeg] Background video loaded')
     }
 
-    const lyricsLines = form.includeLyrics && form.lyrics.trim()
-      ? form.lyrics.trim().split(/\n+/).map((l) => l.trim()).filter(Boolean)
-      : []
+    let audioForLyrics: File | null = form.audioFile
+    if (!audioForLyrics && form.includeLyrics && form.mainMedia?.type === 'video') {
+      try {
+        audioForLyrics = await extractAudioFromVideo(form.mainMedia.file, { onStatus })
+      } catch (e) {
+        console.warn('[FFmpeg] Could not extract audio from video for lyrics:', e)
+      }
+    }
+    const lyricsParsed = await resolveLyricsForRender({
+      includeLyrics: form.includeLyrics,
+      lyricFile: form.lyricFile,
+      lyricFileFormat: form.lyricFileFormat,
+      lyrics: form.lyrics,
+      audioFile: audioForLyrics,
+      replicateApiKey: form.replicateApiKey,
+      localWhisperUrl: form.localWhisperUrl,
+      onStatus,
+    })
 
     const fps = form.fps
     const frameInterval = 1000 / fps
@@ -440,7 +484,7 @@ export async function renderVideoOfflineWebm(form: FormData, cb: OfflineRenderCa
           title: form.title,
           artist: form.artist,
           album: form.album,
-          lyricsLines,
+          lyricsParsed,
           spectrumBars: pseudoBars,
           audioLevel: pseudoLevel,
           visualizer: form.visualizer,
@@ -451,6 +495,9 @@ export async function renderVideoOfflineWebm(form: FormData, cb: OfflineRenderCa
           frontImageOpacityWhenVideo: form.frontImageOpacityWhenVideo,
           visualizerSize: form.visualizerSize,
           visualizerPosition: form.visualizerPosition,
+          lyricPosition: form.lyricPosition,
+          lyricStyleOverrides: form.useLyricStyleOverrides ? form.lyricStyleOverrides : undefined,
+          visualizerPlacement: form.visualizerPlacement,
           instrumental: form.instrumental,
           cardStyle: form.cardStyle,
           cardAutoHideSeconds: form.cardAutoHide ? form.cardAutoHideSeconds : undefined,

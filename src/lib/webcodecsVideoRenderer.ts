@@ -1,5 +1,7 @@
 import type { FormData, VideoOrientationId } from '../App'
 import { drawFrame, loadImage, SLIDESHOW_TRANSITION_IDS } from './canvasRenderer'
+import { resolveLyricsForRender } from './lyricSync'
+import { extractAudioFromVideo } from './offlineVideoRenderer'
 import { detectFaceInImage, detectFacesInImages, type FaceBox } from './faceDetection'
 import { convertImageToAnime, isAnimeConversionAvailable } from './animeConversion'
 import { seekVideo } from './videoSeek'
@@ -219,9 +221,24 @@ export async function renderVideoWebCodecs(
       console.log('[WebCodecs] Background video loaded')
     }
 
-    const lyricsLines = form.includeLyrics && form.lyrics.trim()
-      ? form.lyrics.trim().split(/\n+/).map((l) => l.trim()).filter(Boolean)
-      : []
+    let audioForLyrics: File | null = form.audioFile
+    if (!audioForLyrics && form.includeLyrics && form.mainMedia?.type === 'video') {
+      try {
+        audioForLyrics = await extractAudioFromVideo(form.mainMedia.file, { onStatus })
+      } catch (e) {
+        console.warn('[WebCodecs] Could not extract audio from video for lyrics:', e)
+      }
+    }
+    const lyricsParsed = await resolveLyricsForRender({
+      includeLyrics: form.includeLyrics,
+      lyricFile: form.lyricFile,
+      lyricFileFormat: form.lyricFileFormat,
+      lyrics: form.lyrics,
+      audioFile: audioForLyrics,
+      replicateApiKey: form.replicateApiKey,
+      localWhisperUrl: form.localWhisperUrl,
+      onStatus,
+    })
 
     const fps = form.fps
     const frameInterval = 1000 / fps
@@ -394,7 +411,7 @@ export async function renderVideoWebCodecs(
         title: form.title,
         artist: form.artist,
         album: form.album,
-        lyricsLines,
+        lyricsParsed,
         spectrumBars: pseudoBars,
         audioLevel: pseudoLevel,
         visualizer: form.visualizer,
@@ -405,6 +422,9 @@ export async function renderVideoWebCodecs(
         frontImageOpacityWhenVideo: form.frontImageOpacityWhenVideo,
         visualizerSize: form.visualizerSize,
         visualizerPosition: form.visualizerPosition,
+        lyricPosition: form.lyricPosition,
+        lyricStyleOverrides: form.useLyricStyleOverrides ? form.lyricStyleOverrides : undefined,
+        visualizerPlacement: form.visualizerPlacement,
         instrumental: form.instrumental,
         cardStyle: form.cardStyle,
         cardAutoHideSeconds: form.cardAutoHide ? form.cardAutoHideSeconds : undefined,

@@ -13,6 +13,8 @@ import { drawBackgroundEffect } from './drawBackgroundEffects'
 import type { ParticleEffectId } from './videoParticleEffects'
 import { drawParticleEffect } from './drawParticleEffects'
 import type { CardStyleId } from './cardStyles'
+import type { AssStyle, LyricStyleOverrides, ParsedLyrics } from './lyricSync'
+import { getCurrentLineIndex, mergeLyricStyleOverrides } from './lyricSync'
 import { getCardAnimation, CARD_ENTRANCE_MS } from './cardStyles'
 
 export type SlideshowTransitionId =
@@ -134,6 +136,213 @@ const PANEL_SLIDE_MS = 1000
 const TEXT_STAGGER_MS = 100
 const LYRIC_FONT_SCALE = 0.032
 
+/** Lyric line effects for rendering */
+type LyricEffects = {
+  lineTimeMs: number
+  endTimeMs?: number
+  currentTimeMs: number
+  scale: number
+  scriptRes: { x: number; y: number }
+  canvasWidth: number
+  canvasHeight: number
+  zoomEffect?: { t1: number; t2: number; scaleX: number; scaleY: number }
+  fadeEffect?: { fadeIn: number; fadeOut: number }
+  moveEffect?: { x1: number; y1: number; x2: number; y2: number; t1: number; t2: number }
+  karaokeSegments?: { text: string; durationMs: number }[]
+}
+
+/** Draw lyric text with outline, shadow, zoom, fade, move, karaoke. */
+function drawLyricWithStyle(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  assStyle: AssStyle,
+  fallbackColor: string,
+  scale: number,
+  effects?: LyricEffects
+) {
+  const lineTimeMs = effects?.lineTimeMs
+  const currentTimeMs = effects?.currentTimeMs ?? 0
+  const zoomEffect = effects?.zoomEffect
+  const fadeEffect = effects?.fadeEffect
+  const moveEffect = effects?.moveEffect
+  const karaokeSegments = effects?.karaokeSegments
+  const scriptRes = effects?.scriptRes ?? { x: 1920, y: 1080 }
+
+  let drawX = x
+  let drawY = y
+  if (moveEffect && typeof lineTimeMs === 'number') {
+    const elapsed = currentTimeMs - lineTimeMs
+    const span = moveEffect.t2 - moveEffect.t1
+    const t = span > 0 ? Math.min(1, Math.max(0, (elapsed - moveEffect.t1) / span)) : 1
+    const sx = (1 - t) * moveEffect.x1 + t * moveEffect.x2
+    const sy = (1 - t) * moveEffect.y1 + t * moveEffect.y2
+    drawX = (sx / scriptRes.x) * effects!.canvasWidth
+    drawY = (sy / scriptRes.y) * effects!.canvasHeight
+  }
+
+  let alpha = 1
+  if (fadeEffect && typeof lineTimeMs === 'number' && effects?.endTimeMs != null) {
+    const elapsed = currentTimeMs - lineTimeMs
+    const duration = effects.endTimeMs - lineTimeMs
+    if (elapsed < fadeEffect.fadeIn) alpha = elapsed / fadeEffect.fadeIn
+    else if (duration - elapsed < fadeEffect.fadeOut) alpha = Math.max(0, (duration - elapsed) / fadeEffect.fadeOut)
+  }
+  if (alpha < 1) ctx.globalAlpha *= alpha
+  const fillColor = assStyle.color ?? fallbackColor
+  const scaledOutline = Math.max(0.5, assStyle.outlineWidth * scale)
+  const scaledShadow = Math.max(0.5, assStyle.shadowDepth * scale)
+  const hasOutline = (assStyle.outlineWidth > 0 || assStyle.outlineColor) && assStyle.outlineColor
+  const hasShadow = (assStyle.shadowDepth > 0 || assStyle.shadowColor) && assStyle.shadowColor
+  const outlineW = hasOutline ? Math.max(1, scaledOutline) : 0
+  const shadowD = hasShadow ? Math.max(1, scaledShadow) : 0
+
+  let zoomScaleX = 1
+  let zoomScaleY = 1
+  if (zoomEffect && typeof lineTimeMs === 'number') {
+    const elapsed = currentTimeMs - lineTimeMs
+    const targetX = zoomEffect.scaleX / 100
+    const targetY = zoomEffect.scaleY / 100
+    if (elapsed >= zoomEffect.t1 && elapsed <= zoomEffect.t2) {
+      const span = zoomEffect.t2 - zoomEffect.t1
+      const t = span > 0 ? (elapsed - zoomEffect.t1) / span : 1
+      zoomScaleX = 1 + (targetX - 1) * t
+      zoomScaleY = 1 + (targetY - 1) * t
+    } else if (elapsed > zoomEffect.t2) {
+      zoomScaleX = targetX
+      zoomScaleY = targetY
+    }
+  }
+  const hasZoom = zoomScaleX !== 1 || zoomScaleY !== 1
+
+  if (hasZoom) {
+    ctx.save()
+    ctx.translate(drawX, drawY)
+    ctx.scale(zoomScaleX, zoomScaleY)
+    ctx.translate(-drawX, -drawY)
+  }
+
+  const primaryColor = assStyle.color ?? fallbackColor
+  const secondaryColor = assStyle.secondaryColor ?? primaryColor
+
+  if (karaokeSegments && karaokeSegments.length > 0 && typeof lineTimeMs === 'number') {
+    const elapsed = currentTimeMs - lineTimeMs
+    let offset = 0
+    const totalW = karaokeSegments.reduce((s, seg) => s + ctx.measureText(seg.text).width, 0)
+    let segX = drawX - totalW / 2
+    ctx.textAlign = 'left'
+    ctx.textBaseline = 'middle'
+    for (const seg of karaokeSegments) {
+      const segStart = offset
+      const segEnd = offset + seg.durationMs
+      offset = segEnd
+      const filled = elapsed >= segEnd
+      const current = elapsed >= segStart && elapsed < segEnd
+      const color = filled || current ? primaryColor : secondaryColor
+      if (shadowD > 0) {
+        ctx.shadowColor = assStyle.shadowColor!
+        ctx.shadowBlur = shadowD * 2
+        ctx.shadowOffsetX = shadowD * 0.6
+        ctx.shadowOffsetY = shadowD * 0.6
+      }
+      if (outlineW > 0 && seg.text) {
+        ctx.strokeStyle = assStyle.outlineColor!
+        ctx.lineWidth = outlineW
+        ctx.lineJoin = 'round'
+        ctx.miterLimit = 2
+        ctx.strokeText(seg.text, segX, drawY)
+      }
+      if (seg.text) {
+        ctx.fillStyle = color
+        ctx.fillText(seg.text, segX, drawY)
+        segX += ctx.measureText(seg.text).width
+      }
+    }
+    if (shadowD > 0) {
+      ctx.shadowBlur = 0
+      ctx.shadowOffsetX = 0
+      ctx.shadowOffsetY = 0
+    }
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    if (hasZoom) ctx.restore()
+    if (alpha < 1) ctx.globalAlpha /= alpha
+    return
+  }
+
+  if (shadowD > 0) {
+    ctx.shadowColor = assStyle.shadowColor!
+    ctx.shadowBlur = shadowD * 2
+    ctx.shadowOffsetX = shadowD * 0.6
+    ctx.shadowOffsetY = shadowD * 0.6
+  }
+  if (outlineW > 0) {
+    ctx.strokeStyle = assStyle.outlineColor!
+    ctx.lineWidth = outlineW
+    ctx.lineJoin = 'round'
+    ctx.miterLimit = 2
+    ctx.strokeText(text, drawX, drawY)
+  }
+  ctx.fillStyle = primaryColor
+  ctx.fillText(text, drawX, drawY)
+  if (shadowD > 0) {
+    ctx.shadowBlur = 0
+    ctx.shadowOffsetX = 0
+    ctx.shadowOffsetY = 0
+  }
+  if (hasZoom) ctx.restore()
+  if (alpha < 1) ctx.globalAlpha /= alpha
+}
+
+/** Apply ASS style to ctx and return draw position + scale. scriptRes used to scale fontSize and margins. */
+function applyAssStyle(
+  ctx: CanvasRenderingContext2D,
+  assStyle: AssStyle,
+  boxX: number,
+  boxY: number,
+  boxW: number,
+  boxH: number,
+  canvasHeight: number,
+  scriptRes?: { x: number; y: number }
+): { x: number; y: number; scale: number } {
+  const res = scriptRes ?? { x: 1920, y: 1080 }
+  const scale = canvasHeight / res.y
+  const fontSize = Math.round(assStyle.fontSize * scale)
+  const ml = assStyle.marginL * scale
+  const mr = assStyle.marginR * scale
+  const mv = assStyle.marginV * scale
+  const fontParts = [
+    assStyle.italic ? 'italic' : '',
+    assStyle.bold ? 'bold' : '',
+    `${fontSize}px`,
+    assStyle.fontName || 'Arial',
+  ].filter(Boolean)
+  ctx.font = (fontParts.join(' ') || `${fontSize}px Arial`) as string
+  const alignMap: Record<number, CanvasTextAlign> = {
+    1: 'left', 4: 'left', 7: 'left',
+    2: 'center', 5: 'center', 8: 'center',
+    3: 'right', 6: 'right', 9: 'right',
+  }
+  const baselineMap: Record<number, CanvasTextBaseline> = {
+    1: 'bottom', 2: 'bottom', 3: 'bottom',
+    4: 'middle', 5: 'middle', 6: 'middle',
+    7: 'top', 8: 'top', 9: 'top',
+  }
+  ctx.textAlign = alignMap[assStyle.alignment] ?? 'center'
+  ctx.textBaseline = baselineMap[assStyle.alignment] ?? 'middle'
+  let x: number
+  let y: number
+  const a = assStyle.alignment
+  if (a === 1 || a === 4 || a === 7) x = boxX + ml
+  else if (a === 3 || a === 6 || a === 9) x = boxX + boxW - mr
+  else x = boxX + boxW / 2
+  if (a === 1 || a === 2 || a === 3) y = boxY + boxH - mv
+  else if (a === 7 || a === 8 || a === 9) y = boxY + mv
+  else y = boxY + boxH / 2
+  return { x, y, scale }
+}
+
 export function drawFrame(
   ctx: CanvasRenderingContext2D,
   opts: {
@@ -148,7 +357,8 @@ export function drawFrame(
     title: string
     artist: string
     album: string
-    lyricsLines: string[]
+    /** Parsed lyrics: synced (LRC) or plain. Replaces legacy lyricsLines. */
+    lyricsParsed?: ParsedLyrics
     spectrumBars?: number[] | null
     audioLevel?: number
     visualizer?: VisualizerId
@@ -160,6 +370,12 @@ export function drawFrame(
     frontImageOpacityWhenVideo?: number
     visualizerSize?: 'small' | 'medium' | 'large' | 'full'
     visualizerPosition?: 'top' | 'aboveCard' | 'center'
+    /** Where to show lyrics when present: in card or on screen overlay */
+    lyricPosition?: 'card' | 'screen'
+    /** Optional lyric style overrides (font, colors, outline). Merged with ASS style. */
+    lyricStyleOverrides?: LyricStyleOverrides | null
+    /** Where to show visualizer: in card or on video/screen */
+    visualizerPlacement?: 'card' | 'screen'
     /** Instrumental mode: cover-focused animation with Ken Burns and full-width visualizer */
     instrumental?: boolean
     /** Card/box style: slide, fadeUp, scale, pill, glass */
@@ -185,7 +401,7 @@ export function drawFrame(
     drawInstrumentalFrame(ctx, opts)
     return
   }
-  const { width, height, timeMs, durationMs, style, image, frontVideo, title, artist, album, lyricsLines, spectrumBars, audioLevel, visualizer, backgroundEffect, particleEffect, imageOpacityWithEffect, backgroundVideo, frontImageOpacityWhenVideo, visualizerSize, visualizerPosition, cardStyle, cardAutoHideSeconds, slideshowImages, slideshowCurrentIndex = 0, slideshowTransitionProgress = 0, slideshowTransition = 'fade', slideshowSlideDurationMs, videoAnimation: videoAnimationOpt = 'kenBurns', faceBox, animeFrames } = opts
+  const { width, height, timeMs, durationMs, style, image, frontVideo, title, artist, album, lyricsParsed, spectrumBars, audioLevel, visualizer, backgroundEffect, particleEffect, imageOpacityWithEffect, backgroundVideo, frontImageOpacityWhenVideo, visualizerSize, visualizerPosition, lyricPosition = 'card', visualizerPlacement = 'screen', lyricStyleOverrides, cardStyle, cardAutoHideSeconds, slideshowImages, slideshowCurrentIndex = 0, slideshowTransitionProgress = 0, slideshowTransition = 'fade', slideshowSlideDurationMs, videoAnimation: videoAnimationOpt = 'kenBurns', faceBox, animeFrames } = opts
   const videoAnimation = videoAnimationOpt ?? 'kenBurns'
   const hasSlideshow = slideshowImages && slideshowImages.length > 0
   const hasImage = !!(image && image.complete && image.naturalWidth > 0)
@@ -359,7 +575,15 @@ export function drawFrame(
   drawParticleEffect(ctx, particleEffect ?? 'none', width, height, timeMs)
 
   const margin = width * 0.04
-  const hasLyrics = lyricsLines.length > 0
+  const parsed: ParsedLyrics = lyricsParsed ?? { type: 'plain', lines: [] }
+  const hasSynced = parsed.type === 'synced' && parsed.lines.length > 0
+  const hasPlain = parsed.type === 'plain' && parsed.lines.length > 0
+  const scriptRes = hasSynced && parsed.type === 'synced' && 'scriptRes' in parsed ? parsed.scriptRes : undefined
+  const hasLyrics = hasSynced || hasPlain
+  const lyricsOnCard = hasLyrics && lyricPosition === 'card'
+  const lyricsOnScreen = hasLyrics && lyricPosition === 'screen'
+  const vizOnScreen = visualizerPlacement === 'screen'
+  const vizInCard = visualizerPlacement === 'card'
   const cardInsetX = width * 0.02
   // Card timing: optional auto-hide after N seconds, using the same entrance animation mirrored for exit.
   let cardVisible = true
@@ -378,11 +602,11 @@ export function drawFrame(
   const cardAnim = getCardAnimation(cardStyleId, cardTimeForAnim, width, height, margin)
   const { drawX: drawCardX, drawY: cardY, cardW, cardH, scale: cardScale, alpha: cardAlpha, radius: cardRadius, useGlass: cardUseGlass, useNeon: cardUseNeon } = cardAnim
 
-  // —— Visualizer on video (strip or full area) when lyrics are provided ——
+  // —— Visualizer on video (strip or full area) when visualizer placement is screen ——
   const isFullSize = vizSize === 'full'
   const vizHeightScale = vizSize === 'small' ? 0.08 : vizSize === 'large' ? 0.18 : vizSize === 'full' ? 0.9 : 0.12
   const vizWidthScale = vizSize === 'small' ? 0.85 : vizSize === 'full' ? 0.9 : 1
-  if (hasLyrics) {
+  if (vizOnScreen) {
     const videoVizH = height * vizHeightScale
     const videoVizW = isFullSize ? width * vizWidthScale : (width - margin * 2) * vizWidthScale
     const videoVizX = isFullSize ? (width - videoVizW) / 2 : margin + ((width - margin * 2) - videoVizW) / 2
@@ -444,9 +668,9 @@ export function drawFrame(
   const artSize = cardH - artInset * 2
   const contentLeft = drawCardX + cardInsetX + volBarW + artInset + artSize + artInset
   const contentWidth = cardW - (contentLeft - drawCardX) - artInset
-  // When no lyrics, use 50/50 split so visualizer gets right half of card; when lyrics, 50% details / 50% lyrics
+  // Details get left half; right half: lyrics (if on card), visualizer (if in card), or both (stacked)
   const detailsWidth = contentWidth * 0.5
-  const lyricsWidth = hasLyrics ? contentWidth * 0.5 : 0
+  const rightHalfWidth = contentWidth * 0.5
 
   // Card background – theme gradient (or glass) + shadow
   ctx.save()
@@ -644,15 +868,19 @@ export function drawFrame(
     ctx.fillText(artist, contentLeft + pad, textY)
   }
 
-  // Visualizer: on video strip when lyrics on (drawn above); in place of lyric box (right half of card) when no lyrics
+  // Visualizer in card (right half, or bottom portion when lyrics also in card)
   const cardVizScale = vizSize === 'small' ? 0.85 : vizSize === 'large' || vizSize === 'full' ? 1 : 1
-  if (!hasLyrics) {
-    const baseVizW = contentWidth - detailsWidth - pad
-    const baseVizH = cardH * 0.72
-    const vizBoxW = baseVizW * cardVizScale
-    const vizBoxH = baseVizH * cardVizScale
-    const vizBoxX = contentLeft + detailsWidth + pad * 0.5 + (baseVizW - vizBoxW) / 2
-    const vizBoxY = cardY + (cardH - vizBoxH) / 2
+  if (vizInCard) {
+    const vizAreaW = contentWidth - detailsWidth - pad
+    const vizAreaH = cardH * (lyricsOnCard ? 0.45 : 0.72)
+    const baseVizW = vizAreaW * cardVizScale
+    const baseVizH = vizAreaH * cardVizScale
+    const vizBoxX = contentLeft + detailsWidth + pad * 0.5 + (vizAreaW - baseVizW) / 2
+    const vizBoxY = lyricsOnCard
+      ? cardY + cardH * 0.55 + (cardH * 0.45 - baseVizH) / 2
+      : cardY + (cardH - baseVizH) / 2
+    const vizBoxW = baseVizW
+    const vizBoxH = baseVizH
     ctx.save()
     roundRect(ctx, vizBoxX, vizBoxY, vizBoxW, vizBoxH, 14)
     ctx.fillStyle = theme.lyricBoxBg
@@ -666,18 +894,16 @@ export function drawFrame(
     ctx.restore()
   }
 
-  // Lyrics (right half of right side) – scroll bottom to top, line by line, inside card
-  if (hasLyrics && lyricsWidth > 0) {
+  // Lyrics in card (right half, or top portion when visualizer also in card)
+  if (lyricsOnCard) {
     const lyricBoxLeft = contentLeft + detailsWidth + pad * 0.5
-    const lyricBoxW = lyricsWidth - pad
-    const lyricBoxH = cardH * 1.14
-    const lyricBoxY = cardY + (cardH - lyricBoxH) / 2
+    const lyricBoxW = rightHalfWidth - pad
+    const lyricBoxH = vizInCard ? cardH * 0.55 : cardH * 1.14
+    const lyricBoxY = vizInCard ? cardY : cardY + (cardH - lyricBoxH) / 2
     const lyricFontSize = Math.round(Math.min(width, height) * LYRIC_FONT_SCALE)
     const lineHeight = lyricFontSize * 1.35
-    const totalLines = lyricsLines.length
-    const lineDurationMs = Math.max(1, Math.floor(durationMs / Math.max(1, totalLines)))
-    const lineIndex = Math.floor(timeMs / lineDurationMs)
-    const scrollOffset = totalLines > 0 ? (timeMs % lineDurationMs) / lineDurationMs : 0
+    const cx = lyricBoxLeft + lyricBoxW / 2
+    const cy = lyricBoxY + lyricBoxH / 2
 
     ctx.save()
     ctx.shadowColor = 'rgba(0,0,0,0.2)'
@@ -694,33 +920,149 @@ export function drawFrame(
     ctx.save()
     roundRect(ctx, lyricBoxLeft, lyricBoxY, lyricBoxW, lyricBoxH, 14)
     ctx.clip()
-    ctx.font = `${theme.bodyStyle} 500 ${lyricFontSize}px ${theme.lyricFont}`
-    ctx.fillStyle = theme.lyricTextColor
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'middle'
-    const cx = lyricBoxLeft + lyricBoxW / 2
-
-    const bottomY = lyricBoxY + lyricBoxH
-    const bottomCenterY = bottomY - lineHeight / 2
-    const drawLyricLine = (line: string, y: number) => {
-      if (y < lyricBoxY - lineHeight || y > bottomY + lineHeight) return
-      ctx.fillText(line, cx, y)
+    if (hasSynced) {
+      const idx = getCurrentLineIndex(parsed.lines, timeMs)
+      const lyricLine = idx >= 0 ? parsed.lines[idx] : null
+      if (lyricLine?.text) {
+        const resolvedStyle = mergeLyricStyleOverrides(lyricLine.assStyle ?? null, lyricStyleOverrides)
+        let drawX = cx
+        let drawY = cy
+        if (resolvedStyle) {
+          const pos = applyAssStyle(ctx, resolvedStyle, lyricBoxLeft, lyricBoxY, lyricBoxW, lyricBoxH, height, scriptRes)
+          drawX = pos.x
+          drawY = pos.y
+          const effects: LyricEffects = {
+            lineTimeMs: lyricLine.timeMs,
+            endTimeMs: lyricLine.endTimeMs,
+            currentTimeMs: timeMs,
+            scale: pos.scale,
+            scriptRes: scriptRes ?? { x: 1920, y: 1080 },
+            canvasWidth: width,
+            canvasHeight: height,
+            zoomEffect: lyricLine.zoomEffect,
+            fadeEffect: lyricLine.fadeEffect,
+            moveEffect: lyricLine.moveEffect,
+            karaokeSegments: lyricLine.karaokeSegments,
+          }
+          drawLyricWithStyle(ctx, lyricLine.text, drawX, drawY, resolvedStyle, theme.lyricTextColor, pos.scale, effects)
+        } else {
+          ctx.font = `${theme.bodyStyle} 500 ${lyricFontSize}px ${theme.lyricFont}`
+          ctx.textAlign = 'center'
+          ctx.textBaseline = 'middle'
+          ctx.fillStyle = lyricLine.color ?? theme.lyricTextColor
+          ctx.fillText(lyricLine.text, drawX, drawY)
+        }
+      }
+    } else {
+      ctx.font = `${theme.bodyStyle} 500 ${lyricFontSize}px ${theme.lyricFont}`
+      ctx.fillStyle = theme.lyricTextColor
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      const plainLines = parsed.type === 'plain' ? parsed.lines : []
+      const totalLines = plainLines.length
+      const lineDurationMs = Math.max(1, Math.floor(durationMs / Math.max(1, totalLines)))
+      const lineIndex = Math.floor(timeMs / lineDurationMs)
+      const scrollOffset = totalLines > 0 ? (timeMs % lineDurationMs) / lineDurationMs : 0
+      const bottomY = lyricBoxY + lyricBoxH
+      const bottomCenterY = bottomY - lineHeight / 2
+      const drawLyricLine = (line: string, y: number) => {
+        if (y < lyricBoxY - lineHeight || y > bottomY + lineHeight) return
+        ctx.fillText(line, cx, y)
+      }
+      for (let k = 0; k <= 6; k++) {
+        const i = (lineIndex - k + totalLines * 10) % totalLines
+        const y = bottomCenterY - scrollOffset * lineHeight - k * lineHeight
+        drawLyricLine(plainLines[i] || '', y)
+      }
+      const nextIdx = (lineIndex + 1) % totalLines
+      const incomingY = bottomCenterY - (1 - scrollOffset) * lineHeight
+      drawLyricLine(plainLines[nextIdx] || '', incomingY)
     }
-
-    for (let k = 0; k <= 6; k++) {
-      const idx = (lineIndex - k + totalLines * 10) % totalLines
-      const y = bottomCenterY - scrollOffset * lineHeight - k * lineHeight
-      drawLyricLine(lyricsLines[idx] || '', y)
-    }
-    const incomingIdx = (lineIndex + 1) % totalLines
-    const incomingY = bottomCenterY - (1 - scrollOffset) * lineHeight
-    drawLyricLine(lyricsLines[incomingIdx] || '', incomingY)
 
     ctx.restore()
   }
 
   ctx.restore() // end card scale/alpha transform
   } // end if (cardStyleId !== 'none')
+
+  // Lyrics on screen overlay (no background, centered in lower area)
+  if (lyricsOnScreen) {
+    const lyricFontSize = Math.round(Math.min(width, height) * 0.045)
+    const lineHeight = lyricFontSize * 1.4
+    const boxPad = width * 0.06
+    const boxW = width - boxPad * 2
+    const boxH = Math.min(height * 0.35, lineHeight * 5)
+    const boxX = boxPad
+    const boxY = height - boxH - height * 0.12
+    const cx = boxX + boxW / 2
+    const cy = boxY + boxH / 2
+    // For ASS: use full video area so positioning matches .ass file
+    const assBoxX = 0
+    const assBoxY = 0
+    const assBoxW = width
+    const assBoxH = height
+
+    ctx.save()
+    if (hasSynced) {
+      const idx = getCurrentLineIndex(parsed.lines, timeMs)
+      const lyricLine = idx >= 0 ? parsed.lines[idx] : null
+      if (lyricLine?.text) {
+        const resolvedStyle = mergeLyricStyleOverrides(lyricLine.assStyle ?? null, lyricStyleOverrides)
+        let drawX = cx
+        let drawY = cy
+        if (resolvedStyle) {
+          const pos = applyAssStyle(ctx, resolvedStyle, assBoxX, assBoxY, assBoxW, assBoxH, height, scriptRes)
+          drawX = pos.x
+          drawY = pos.y
+          const effects: LyricEffects = {
+            lineTimeMs: lyricLine.timeMs,
+            endTimeMs: lyricLine.endTimeMs,
+            currentTimeMs: timeMs,
+            scale: pos.scale,
+            scriptRes: scriptRes ?? { x: 1920, y: 1080 },
+            canvasWidth: width,
+            canvasHeight: height,
+            zoomEffect: lyricLine.zoomEffect,
+            fadeEffect: lyricLine.fadeEffect,
+            moveEffect: lyricLine.moveEffect,
+            karaokeSegments: lyricLine.karaokeSegments,
+          }
+          drawLyricWithStyle(ctx, lyricLine.text, drawX, drawY, resolvedStyle, theme.lyricTextColor, pos.scale, effects)
+        } else {
+          ctx.font = `${theme.bodyStyle} 600 ${lyricFontSize}px ${theme.lyricFont}`
+          ctx.textAlign = 'center'
+          ctx.textBaseline = 'middle'
+          ctx.fillStyle = lyricLine.color ?? theme.lyricTextColor
+          ctx.fillText(lyricLine.text, drawX, drawY)
+        }
+      }
+    } else {
+      ctx.font = `${theme.bodyStyle} 600 ${lyricFontSize}px ${theme.lyricFont}`
+      ctx.fillStyle = theme.lyricTextColor
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      const plainLines = parsed.type === 'plain' ? parsed.lines : []
+      const totalLines = plainLines.length
+      const lineDurationMs = Math.max(1, Math.floor(durationMs / Math.max(1, totalLines)))
+      const lineIndex = Math.floor(timeMs / lineDurationMs)
+      const scrollOffset = totalLines > 0 ? (timeMs % lineDurationMs) / lineDurationMs : 0
+      const bottomY = boxY + boxH
+      const bottomCenterY = bottomY - lineHeight / 2
+      const drawLyricLine = (line: string, y: number) => {
+        if (y < boxY - lineHeight || y > bottomY + lineHeight) return
+        ctx.fillText(line, cx, y)
+      }
+      for (let k = 0; k <= 6; k++) {
+        const idx = (lineIndex - k + totalLines * 10) % totalLines
+        const y = bottomCenterY - scrollOffset * lineHeight - k * lineHeight
+        drawLyricLine(plainLines[idx] || '', y)
+      }
+      const incomingIdx = (lineIndex + 1) % totalLines
+      const incomingY = bottomCenterY - (1 - scrollOffset) * lineHeight
+      drawLyricLine(plainLines[incomingIdx] || '', incomingY)
+    }
+    ctx.restore()
+  }
 }
 
 type InstrumentalOpts = Parameters<typeof drawFrame>[1]
