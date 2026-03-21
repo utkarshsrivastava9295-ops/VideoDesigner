@@ -226,6 +226,23 @@ function drawLyricWithStyle(
   const primaryColor = assStyle.color ?? fallbackColor
   const secondaryColor = assStyle.secondaryColor ?? primaryColor
 
+  const drawOpaqueBox = (centerX: number, centerY: number, totalWidth: number) => {
+    if (assStyle.borderStyle !== 3 || !assStyle.shadowColor) return
+    const pad = Math.max(2, outlineW)
+    const boxW = totalWidth + pad * 2
+    const boxH = (assStyle.fontSize * scale) * 1.4 + pad * 2
+    ctx.fillStyle = assStyle.shadowColor
+    ctx.fillRect(centerX - boxW / 2, centerY - boxH / 2, boxW, boxH)
+  }
+
+  // ASS BorderStyle 3: opaque box behind text (BackColour). Draw first so text sits on top.
+  if (karaokeSegments && karaokeSegments.length > 0) {
+    const totalW = karaokeSegments.reduce((s, seg) => s + ctx.measureText(seg.text).width, 0)
+    drawOpaqueBox(drawX, drawY, totalW)
+  } else {
+    drawOpaqueBox(drawX, drawY, ctx.measureText(text).width)
+  }
+
   if (karaokeSegments && karaokeSegments.length > 0 && typeof lineTimeMs === 'number') {
     const elapsed = currentTimeMs - lineTimeMs
     let offset = 0
@@ -582,6 +599,9 @@ export function drawFrame(
   const hasLyrics = hasSynced || hasPlain
   const lyricsOnCard = hasLyrics && lyricPosition === 'card'
   const lyricsOnScreen = hasLyrics && lyricPosition === 'screen'
+  /** Lyrics on card are drawn inside the card block. When card style is "None", that block is skipped — draw lyrics as full-screen overlay instead. */
+  const lyricsOverlayWhenNoCard = hasLyrics && lyricPosition === 'card' && cardStyleId === 'none'
+  const showLyricsOverlay = lyricsOnScreen || lyricsOverlayWhenNoCard
   const vizOnScreen = visualizerPlacement === 'screen'
   const vizInCard = visualizerPlacement === 'card'
   const cardInsetX = width * 0.02
@@ -985,8 +1005,8 @@ export function drawFrame(
   ctx.restore() // end card scale/alpha transform
   } // end if (cardStyleId !== 'none')
 
-  // Lyrics on screen overlay (no background, centered in lower area)
-  if (lyricsOnScreen) {
+  // Lyrics on screen overlay (or when "On card" but card style is None — card UI is skipped otherwise)
+  if (showLyricsOverlay) {
     const lyricFontSize = Math.round(Math.min(width, height) * 0.045)
     const lineHeight = lyricFontSize * 1.4
     const boxPad = width * 0.06

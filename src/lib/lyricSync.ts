@@ -2,16 +2,19 @@
  * Lyric sync: LRC, SRT, ASS parsing and AI extraction via Whisper Large V3.
  */
 
-/** ASS style properties parsed from .ass file */
+/** ASS style properties parsed from .ass file. Follows ASS spec exactly. */
 export type AssStyle = {
   fontName: string
   fontSize: number
   color?: string
   secondaryColor?: string
   outlineColor?: string
+  /** BackColour: shadow when borderStyle=1, opaque box fill when borderStyle=3 */
   shadowColor?: string
   outlineWidth: number
   shadowDepth: number
+  /** 1=Outline+shadow, 3=Opaque box */
+  borderStyle: 1 | 2 | 3
   bold: boolean
   italic: boolean
   alignment: number
@@ -59,6 +62,7 @@ const DEFAULT_LYRIC_STYLE: AssStyle = {
   shadowColor: '#EA6262',
   outlineWidth: 2,
   shadowDepth: 2,
+  borderStyle: 1,
 }
 
 /** Merge form overrides onto base AssStyle. Returns new AssStyle. */
@@ -82,6 +86,7 @@ export function mergeLyricStyleOverrides(
     shadowColor: shc ? parseLyricStyleColor(shc) : defaults.shadowColor,
     outlineWidth: overrides.outlineWidth ?? defaults.outlineWidth,
     shadowDepth: overrides.shadowDepth ?? defaults.shadowDepth,
+    borderStyle: defaults.borderStyle,
     bold: overrides.bold ?? defaults.bold,
     italic: overrides.italic ?? defaults.italic,
     alignment: overrides.alignment ?? defaults.alignment,
@@ -336,6 +341,8 @@ function parseAss(content: string): ParsedLyrics {
       const shadowColor = assColorToCss(get('backcolour'))
       const outlineWidth = Math.max(0, parseInt(get('outline'), 10) || 0)
       const shadowDepth = Math.max(0, parseInt(get('shadow'), 10) || 0)
+      const borderStyleRaw = parseInt(get('borderstyle'), 10)
+      const borderStyle: 1 | 2 | 3 = borderStyleRaw === 3 ? 3 : borderStyleRaw === 2 ? 2 : 1
       const bold = parseAssBool(get('bold'))
       const italic = parseAssBool(get('italic'))
       const alignment = parseInt(get('alignment'), 10) || 2
@@ -351,6 +358,7 @@ function parseAss(content: string): ParsedLyrics {
         shadowColor: shadowColor || undefined,
         outlineWidth,
         shadowDepth,
+        borderStyle,
         bold,
         italic,
         alignment,
@@ -381,6 +389,7 @@ function parseAss(content: string): ParsedLyrics {
           shadowColor: baseStyle.shadowColor,
           outlineWidth: baseStyle.outlineWidth,
           shadowDepth: baseStyle.shadowDepth,
+          borderStyle: baseStyle.borderStyle,
           bold: overrides.bold ?? baseStyle.bold,
           italic: overrides.italic ?? baseStyle.italic,
           alignment: overrides.alignment ?? baseStyle.alignment,
@@ -397,6 +406,7 @@ function parseAss(content: string): ParsedLyrics {
           shadowColor: undefined,
           outlineWidth: 0,
           shadowDepth: 0,
+          borderStyle: 1,
           bold: overrides.bold ?? false,
           italic: overrides.italic ?? false,
           alignment: overrides.alignment ?? 2,
