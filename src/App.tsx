@@ -54,6 +54,17 @@ export type FormData = {
   album: string
   lyrics: string
   includeLyrics: boolean
+  /** LRC, SRT, or ASS file – used first if provided */
+  lyricFile: File | null
+  lyricFileFormat: 'lrc' | 'srt' | 'ass' | null
+  /** When lyrics are enabled: show them in the card (right half) or on screen (overlay) */
+  lyricPosition: 'card' | 'screen'
+  /** When true, use custom lyric style from lyricStyleOverrides. When false, use styles from .ass file. */
+  useLyricStyleOverrides: boolean
+  /** Custom lyric style (font, colors, outline). Only applied when useLyricStyleOverrides is true. */
+  lyricStyleOverrides?: import('./lib/lyricSync').LyricStyleOverrides
+  /** Where to show the audio visualizer: in the card or on the video/screen */
+  visualizerPlacement: 'card' | 'screen'
   resolution: '720p' | '1080p' | '4k'
   /** Video orientation / aspect ratio (16:9 landscape, 9:16 shorts, etc.) */
   videoOrientation: VideoOrientationId
@@ -109,6 +120,8 @@ export type FormData = {
   outputFormat: 'webm' | 'mp4'
   /** When enabled, convert MP4 input videos to WebM before use (may fix decode/seek issues; can be slow) */
   convertMp4InputToWebm: boolean
+  /** Local Whisper API URL (e.g. http://127.0.0.1:8002 for faster-whisper-server). When set, used for lyric extraction instead of Replicate or in-browser model. */
+  localWhisperUrl: string
 }
 
 export type VideoOrientationId = '16:9' | '9:16' | '1:1' | '4:5'
@@ -124,6 +137,11 @@ const initialForm: FormData = {
   album: '',
   lyrics: '',
   includeLyrics: false,
+  lyricFile: null,
+  lyricFileFormat: null,
+  lyricPosition: 'card',
+  useLyricStyleOverrides: false,
+  visualizerPlacement: 'screen',
   resolution: '1080p',
   videoOrientation: '16:9',
   preferGpu: true,
@@ -154,6 +172,7 @@ const initialForm: FormData = {
   renderEncoder: 'ffmpeg',
   outputFormat: 'mp4',
   convertMp4InputToWebm: false,
+  localWhisperUrl: 'http://127.0.0.1:8002',
 }
 
 export default function App() {
@@ -541,9 +560,35 @@ export default function App() {
               <LyricsInput
                 lyrics={form.lyrics}
                 includeLyrics={form.includeLyrics}
+                lyricFile={form.lyricFile}
+                lyricFileFormat={form.lyricFileFormat}
+                lyricPosition={form.lyricPosition}
                 onChange={(lyrics, include) =>
                   setForm((f) => ({ ...f, lyrics, includeLyrics: include }))
                 }
+                onLyricPositionChange={(pos) =>
+                  setForm((f) => ({ ...f, lyricPosition: pos }))
+                }
+                onLyricFileChange={(file, format) =>
+                  setForm((f) => ({ ...f, lyricFile: file, lyricFileFormat: format }))
+                }
+                useLyricStyleOverrides={form.useLyricStyleOverrides}
+                onUseLyricStyleOverridesChange={(v) =>
+                  setForm((f) => ({ ...f, useLyricStyleOverrides: v }))
+                }
+                lyricStyleOverrides={form.lyricStyleOverrides}
+                onLyricStyleOverridesChange={(o) =>
+                  setForm((f) => ({ ...f, lyricStyleOverrides: o }))
+                }
+                audioFile={form.audioFile}
+                videoFileForExtract={
+                  !form.audioFile && form.mainMedia?.type === 'video'
+                    ? form.mainMedia.file
+                    : null
+                }
+                replicateApiKey={form.replicateApiKey}
+                localWhisperUrl={form.localWhisperUrl}
+                onLocalWhisperUrlChange={(url) => setForm((f) => ({ ...f, localWhisperUrl: url }))}
               />
 
               <motion.div
@@ -747,8 +792,36 @@ export default function App() {
                     </div>
                   </div>
                   <div>
+                    <p className="text-slate-400 text-sm mb-2">Visualizer placement</p>
+                    <p className="text-slate-500 text-xs mb-2">Show visualizer in the card or on the video/screen.</p>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setForm((f) => ({ ...f, visualizerPlacement: 'card' }))}
+                        className={`px-3 py-2 rounded-lg text-sm font-medium border transition ${
+                          form.visualizerPlacement === 'card'
+                            ? 'border-violet-500 bg-violet-500/20 text-white'
+                            : 'border-white/10 bg-white/5 text-slate-300 hover:border-white/20'
+                        }`}
+                      >
+                        On card
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setForm((f) => ({ ...f, visualizerPlacement: 'screen' }))}
+                        className={`px-3 py-2 rounded-lg text-sm font-medium border transition ${
+                          form.visualizerPlacement === 'screen'
+                            ? 'border-violet-500 bg-violet-500/20 text-white'
+                            : 'border-white/10 bg-white/5 text-slate-300 hover:border-white/20'
+                        }`}
+                      >
+                        On screen
+                      </button>
+                    </div>
+                  </div>
+                  <div>
                     <p className="text-slate-400 text-sm mb-2">Visualizer position on video</p>
-                    <p className="text-slate-500 text-xs mb-2">When lyrics are on, the visualizer strip uses this position. With no lyrics it stays in the card.</p>
+                    <p className="text-slate-500 text-xs mb-2">When visualizer is on screen: top, above card, or center.</p>
                     <div className="flex flex-wrap gap-2">
                       {[
                         { id: 'top' as const, label: 'Top' },
