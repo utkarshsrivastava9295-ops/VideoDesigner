@@ -1537,8 +1537,18 @@ function wrapAndDraw(
 export function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image()
-    img.crossOrigin = 'anonymous'
-    img.onload = () => resolve(img)
+    // Blob/data URLs are same-origin; forcing crossOrigin can break decode or canvas readback in some browsers.
+    if (!src.startsWith('blob:') && !src.startsWith('data:')) {
+      img.crossOrigin = 'anonymous'
+    }
+    img.onload = () => {
+      const done = () => resolve(img)
+      if (typeof img.decode === 'function') {
+        img.decode().then(done).catch(done)
+      } else {
+        done()
+      }
+    }
     img.onerror = reject
     img.src = src
   })

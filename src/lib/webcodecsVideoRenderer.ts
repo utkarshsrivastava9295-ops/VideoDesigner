@@ -43,6 +43,29 @@ export function isWebCodecsSupported(): boolean {
   return typeof VideoEncoder !== 'undefined' && typeof VideoFrame !== 'undefined'
 }
 
+/** Prefer direct canvas; fallback to ImageBitmap if canvas is in an invalid state for VideoFrame. */
+async function createVideoFrameFromCanvas(
+  canvas: HTMLCanvasElement,
+  timestampUs: number,
+  durationUs: number
+): Promise<{ frame: VideoFrame; closeExtra?: () => void }> {
+  try {
+    return { frame: new VideoFrame(canvas, { timestamp: timestampUs, duration: durationUs }) }
+  } catch {
+    const bitmap = await createImageBitmap(canvas)
+    return {
+      frame: new VideoFrame(bitmap, { timestamp: timestampUs, duration: durationUs }),
+      closeExtra: () => {
+        try {
+          bitmap.close()
+        } catch {
+          // ignore
+        }
+      },
+    }
+  }
+}
+
 export type WebCodecsRenderCallbacks = {
   onProgress?: (percent: number) => void
   onStatus?: (message: string | null) => void
@@ -76,9 +99,12 @@ export async function renderVideoWebCodecs(
   const canvas = document.createElement('canvas')
   canvas.width = w
   canvas.height = h
-  const ctx = form.preferGpu
-    ? (canvas.getContext('2d', { alpha: false, willReadFrequently: false }) ?? canvas.getContext('2d'))
-    : canvas.getContext('2d')
+  // Do not use desynchronized — it puts the canvas in a state where VideoFrame(canvas) throws "Invalid source state".
+  const ctx =
+    canvas.getContext('2d', {
+      alpha: true,
+      willReadFrequently: true,
+    }) ?? canvas.getContext('2d')
   if (!ctx) throw new Error('Canvas not supported')
 
   let durationMs = (form.durationSeconds || 60) * 1000
@@ -438,9 +464,15 @@ export async function renderVideoWebCodecs(
         animeFrames: animeKeyframes.length > 0 ? { images: animeKeyframes, intervalMs: 1000 } : undefined,
       })
 
-      const frame = new VideoFrame(canvas, { timestamp: timestampUs, duration: frameDurationUs })
+      const { frame, closeExtra } = await createVideoFrameFromCanvas(canvas, timestampUs, frameDurationUs)
       videoEncoder.encode(frame, { keyFrame: i % keyFrameInterval === 0 })
       frame.close()
+      closeExtra?.()
+
+      // Yield so the tab stays responsive during long encodes (progress UI, cancel)
+      if (i % 8 === 0) {
+        await new Promise<void>((r) => setTimeout(r, 0))
+      }
 
       if (i % 10 === 0 || i === totalFrames - 1) {
         const pct = Math.min(85, (i / totalFrames) * 85)

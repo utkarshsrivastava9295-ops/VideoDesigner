@@ -222,9 +222,13 @@ export async function renderVideoOfflineWebm(form: FormData, cb: OfflineRenderCa
   const canvas = document.createElement('canvas')
   canvas.width = w
   canvas.height = h
-  const ctx = form.preferGpu
-    ? (canvas.getContext('2d', { alpha: false, willReadFrequently: false }) ?? canvas.getContext('2d'))
-    : canvas.getContext('2d')
+  // willReadFrequently: true — every frame is read via toBlob/JPEG for FFmpeg; without this,
+  // GPU-backed 2D canvases can return blank frames when the main visual is a static image (drawImage from HTMLImageElement).
+  const ctx =
+    canvas.getContext('2d', {
+      alpha: true,
+      willReadFrequently: true,
+    }) ?? canvas.getContext('2d')
   if (!ctx) throw new Error('Canvas not supported')
 
   let durationMs = (form.durationSeconds || 60) * 1000

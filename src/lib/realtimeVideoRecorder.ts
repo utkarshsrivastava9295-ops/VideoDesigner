@@ -88,9 +88,11 @@ export async function recordVideoRealtimeWebm(form: FormData, cb: RealtimeRecord
   const canvas = document.createElement('canvas')
   canvas.width = w
   canvas.height = h
-  const ctx = form.preferGpu
-    ? (canvas.getContext('2d', { alpha: false, willReadFrequently: false }) ?? canvas.getContext('2d'))
-    : canvas.getContext('2d')
+  const ctx =
+    canvas.getContext('2d', {
+      alpha: true,
+      willReadFrequently: true,
+    }) ?? canvas.getContext('2d')
   if (!ctx) throw new Error('Canvas not supported')
 
   let image: HTMLImageElement | null = null
@@ -272,7 +274,14 @@ export async function recordVideoRealtimeWebm(form: FormData, cb: RealtimeRecord
     })
 
     const fps = form.fps
-    const videoStream = canvas.captureStream(0)
+    const captureFps = Math.max(1, Math.min(60, Math.round(fps || 30)))
+    // captureStream(0) only emits frames when requestFrame() exists; without it the video track stays black (audio still works).
+    const tryStream = canvas.captureStream(0)
+    const tryTrack = tryStream.getVideoTracks()[0] as MediaStreamTrack & { requestFrame?: () => void }
+    const videoStream =
+      typeof tryTrack?.requestFrame === 'function'
+        ? tryStream
+        : (tryStream.getTracks().forEach((t) => t.stop()), canvas.captureStream(captureFps))
     const videoTrack = videoStream.getVideoTracks()[0] as MediaStreamTrack & { requestFrame?: () => void }
 
     let getSpectrumBars: (() => number[]) | null = null
