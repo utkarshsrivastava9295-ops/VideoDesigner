@@ -428,6 +428,7 @@ export async function renderVideoWebCodecs(
         instrumental: form.instrumental,
         cardStyle: form.cardStyle,
         cardAutoHideSeconds: form.cardAutoHide ? form.cardAutoHideSeconds : undefined,
+        cardAutoHideShowCount: form.cardAutoHide ? form.cardAutoHideShowCount : undefined,
         slideshowImages: slideshowImages.length > 0 ? slideshowImages : undefined,
         slideshowCurrentIndex,
         slideshowTransitionProgress,

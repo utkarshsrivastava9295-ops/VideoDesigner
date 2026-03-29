@@ -100,6 +100,8 @@ export type FormData = {
   cardAutoHide: boolean
   /** Seconds after which the card should start disappearing (only when cardAutoHide is true) */
   cardAutoHideSeconds: number
+  /** How many times the card appears over the video (1 = only at the start) */
+  cardAutoHideShowCount: number
   /** When main media is video: animation applied to the video (zoom, pan, etc.) */
   videoAnimation: VideoAnimationId
   /** When main visual is image/slideshow: detect face with AI and apply gentle nod animation */
@@ -162,6 +164,7 @@ const initialForm: FormData = {
   cardStyle: 'slide',
   cardAutoHide: false,
   cardAutoHideSeconds: 8,
+  cardAutoHideShowCount: 1,
   videoAnimation: 'kenBurns',
   faceNodAnimation: false,
   convertToAnime: false,
@@ -649,25 +652,43 @@ export default function App() {
                       </span>
                     </label>
                     {form.cardAutoHide && (
-                      <div className="flex items-center gap-3">
-                        <span className="text-slate-400 text-sm">Show card for</span>
-                        <input
-                          type="number"
-                          min={2}
-                          max={120}
-                          value={form.cardAutoHideSeconds}
-                          onChange={(e) => {
-                            const v = Number(e.target.value)
-                            const sec = !Number.isNaN(v) ? Math.max(2, Math.min(120, v)) : 8
-                            setForm((f) => ({ ...f, cardAutoHideSeconds: sec }))
-                          }}
-                          className="w-20 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-white focus:border-violet-500/50 outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                        />
-                        <span className="text-slate-400 text-sm">seconds, then fade out</span>
+                      <div className="space-y-3">
+                        <div className="flex flex-wrap items-center gap-3">
+                          <span className="text-slate-400 text-sm">Show card for</span>
+                          <input
+                            type="number"
+                            min={2}
+                            max={120}
+                            value={form.cardAutoHideSeconds}
+                            onChange={(e) => {
+                              const v = Number(e.target.value)
+                              const sec = !Number.isNaN(v) ? Math.max(2, Math.min(120, v)) : 8
+                              setForm((f) => ({ ...f, cardAutoHideSeconds: sec }))
+                            }}
+                            className="w-20 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-white focus:border-violet-500/50 outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                          />
+                          <span className="text-slate-400 text-sm">seconds each time, then fade out</span>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-3">
+                          <span className="text-slate-400 text-sm">Number of times in video</span>
+                          <input
+                            type="number"
+                            min={1}
+                            max={20}
+                            value={form.cardAutoHideShowCount}
+                            onChange={(e) => {
+                              const v = Number(e.target.value)
+                              const n = !Number.isNaN(v) ? Math.max(1, Math.min(20, Math.floor(v))) : 1
+                              setForm((f) => ({ ...f, cardAutoHideShowCount: n }))
+                            }}
+                            className="w-20 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-white focus:border-violet-500/50 outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                          />
+                          <span className="text-slate-500 text-xs">(1 = only at the beginning)</span>
+                        </div>
                       </div>
                     )}
                     <p className="text-slate-500 text-xs">
-                      The card will appear with the selected style, stay visible for the chosen time, then disappear using the same animation in reverse.
+                      Each appearance uses the selected style, stays for the chosen time, then disappears. Multiple appearances are spaced across the video when there is enough time.
                     </p>
                   </div>
                 )}

@@ -259,7 +259,6 @@ function parseMoveEffect(rawText: string): LyricMoveEffect | undefined {
 function parseKaraokeSegments(rawText: string): LyricKaraokeSegment[] | undefined {
   const segments: LyricKaraokeSegment[] = []
   const tagRe = /\{[^}]*\\kf?(\d+)[^}]*\}|\\kf?(\d+)/g
-  let lastEnd = 0
   let m: RegExpExecArray | null
   while ((m = tagRe.exec(rawText)) !== null) {
     const durCs = parseInt(m[1] ?? m[2] ?? '0', 10)
@@ -270,7 +269,6 @@ function parseKaraokeSegments(rawText: string): LyricKaraokeSegment[] | undefine
       .replace(/\\N/g, ' ')
       .trim()
     if (segText || durCs > 0) segments.push({ text: segText || ' ', durationMs: durCs * 10 })
-    lastEnd = m.index + m[0].length + (nextK >= 0 ? nextK : textAfter.length)
   }
   if (segments.length === 0) return undefined
   return segments

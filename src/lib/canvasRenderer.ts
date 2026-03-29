@@ -17,6 +17,56 @@ import type { AssStyle, LyricStyleOverrides, ParsedLyrics } from './lyricSync'
 import { getCurrentLineIndex, mergeLyricStyleOverrides } from './lyricSync'
 import { getCardAnimation, CARD_ENTRANCE_MS } from './cardStyles'
 
+/** Ms from cycle start until exit animation has finished (fade-out starts at hideStartMs). */
+function cardAutoHideFullCycleMs(hideStartMs: number): number {
+  return hideStartMs + CARD_ENTRANCE_MS
+}
+
+/**
+ * Card appears showCount times: each time it runs the entrance, stays until hideStartMs, then exits.
+ * Cycles are spread across durationMs with equal gaps when the timeline fits; otherwise start times are spread from 0 to (duration − cycle).
+ */
+function resolveCardAutoHideState(
+  timeMs: number,
+  durationMs: number,
+  hideStartMs: number,
+  showCount: number
+): { cardVisible: boolean; cardTimeForAnim: number } {
+  const N = Math.max(1, Math.floor(showCount))
+  const T = cardAutoHideFullCycleMs(hideStartMs)
+  const starts: number[] = []
+  if (N === 1) {
+    starts.push(0)
+  } else {
+    const effDuration = Math.max(T, durationMs, 1)
+    const totalNeed = N * T
+    if (totalNeed <= effDuration) {
+      const gap = (effDuration - totalNeed) / (N - 1)
+      for (let i = 0; i < N; i++) starts.push(i * (T + gap))
+    } else {
+      const span = Math.max(0, effDuration - T)
+      if (span <= 0) {
+        for (let i = 0; i < N; i++) starts.push(0)
+      } else {
+        for (let i = 0; i < N; i++) starts.push((i / (N - 1)) * span)
+      }
+    }
+  }
+
+  for (let i = 0; i < starts.length; i++) {
+    const local = timeMs - starts[i]
+    if (local < 0 || local >= T) continue
+    if (local < hideStartMs) {
+      return { cardVisible: true, cardTimeForAnim: local }
+    }
+    const elapsedSinceHide = local - hideStartMs
+    if (elapsedSinceHide < CARD_ENTRANCE_MS) {
+      return { cardVisible: true, cardTimeForAnim: Math.max(0, CARD_ENTRANCE_MS - elapsedSinceHide) }
+    }
+  }
+  return { cardVisible: false, cardTimeForAnim: 0 }
+}
+
 export type SlideshowTransitionId =
   | 'fade'
   | 'zoom'
@@ -190,7 +240,6 @@ function drawLyricWithStyle(
     else if (duration - elapsed < fadeEffect.fadeOut) alpha = Math.max(0, (duration - elapsed) / fadeEffect.fadeOut)
   }
   if (alpha < 1) ctx.globalAlpha *= alpha
-  const fillColor = assStyle.color ?? fallbackColor
   const scaledOutline = Math.max(0.5, assStyle.outlineWidth * scale)
   const scaledShadow = Math.max(0.5, assStyle.shadowDepth * scale)
   const hasOutline = (assStyle.outlineWidth > 0 || assStyle.outlineColor) && assStyle.outlineColor
@@ -399,6 +448,8 @@ export function drawFrame(
     cardStyle?: CardStyleId
     /** When set, the info card will start to disappear after this many seconds using the same animation mirrored */
     cardAutoHideSeconds?: number
+    /** How many times the card appears over the video (default 1: only at the start). */
+    cardAutoHideShowCount?: number
     /** Slideshow: multiple images with transitions */
     slideshowImages?: HTMLImageElement[] | null
     slideshowCurrentIndex?: number
@@ -418,7 +469,7 @@ export function drawFrame(
     drawInstrumentalFrame(ctx, opts)
     return
   }
-  const { width, height, timeMs, durationMs, style, image, frontVideo, title, artist, album, lyricsParsed, spectrumBars, audioLevel, visualizer, backgroundEffect, particleEffect, imageOpacityWithEffect, backgroundVideo, frontImageOpacityWhenVideo, visualizerSize, visualizerPosition, lyricPosition = 'card', visualizerPlacement = 'screen', lyricStyleOverrides, cardStyle, cardAutoHideSeconds, slideshowImages, slideshowCurrentIndex = 0, slideshowTransitionProgress = 0, slideshowTransition = 'fade', slideshowSlideDurationMs, videoAnimation: videoAnimationOpt = 'kenBurns', faceBox, animeFrames } = opts
+  const { width, height, timeMs, durationMs, style, image, frontVideo, title, artist, album, lyricsParsed, spectrumBars, audioLevel, visualizer, backgroundEffect, particleEffect, imageOpacityWithEffect, backgroundVideo, frontImageOpacityWhenVideo, visualizerSize, visualizerPosition, lyricPosition = 'card', visualizerPlacement = 'screen', lyricStyleOverrides, cardStyle, cardAutoHideSeconds, cardAutoHideShowCount, slideshowImages, slideshowCurrentIndex = 0, slideshowTransitionProgress = 0, slideshowTransition = 'fade', slideshowSlideDurationMs, videoAnimation: videoAnimationOpt = 'kenBurns', faceBox, animeFrames } = opts
   const videoAnimation = videoAnimationOpt ?? 'kenBurns'
   const hasSlideshow = slideshowImages && slideshowImages.length > 0
   const hasImage = !!(image && image.complete && image.naturalWidth > 0)
@@ -605,19 +656,18 @@ export function drawFrame(
   const vizOnScreen = visualizerPlacement === 'screen'
   const vizInCard = visualizerPlacement === 'card'
   const cardInsetX = width * 0.02
-  // Card timing: optional auto-hide after N seconds, using the same entrance animation mirrored for exit.
+  // Card timing: optional auto-hide after N seconds, using the same entrance animation mirrored for exit; may repeat across the video.
   let cardVisible = true
   let cardTimeForAnim = timeMs
   if (cardStyleId !== 'none' && typeof cardAutoHideSeconds === 'number' && cardAutoHideSeconds > 0) {
     const hideStartMs = cardAutoHideSeconds * 1000
-    if (timeMs >= hideStartMs) {
-      const elapsedSinceHide = timeMs - hideStartMs
-      if (elapsedSinceHide >= CARD_ENTRANCE_MS) {
-        cardVisible = false
-      } else {
-        cardTimeForAnim = Math.max(0, CARD_ENTRANCE_MS - elapsedSinceHide)
-      }
-    }
+    const count =
+      typeof cardAutoHideShowCount === 'number' && cardAutoHideShowCount >= 1
+        ? Math.floor(cardAutoHideShowCount)
+        : 1
+    const st = resolveCardAutoHideState(timeMs, durationMs, hideStartMs, count)
+    cardVisible = st.cardVisible
+    cardTimeForAnim = st.cardTimeForAnim
   }
   const cardAnim = getCardAnimation(cardStyleId, cardTimeForAnim, width, height, margin)
   const { drawX: drawCardX, drawY: cardY, cardW, cardH, scale: cardScale, alpha: cardAlpha, radius: cardRadius, useGlass: cardUseGlass, useNeon: cardUseNeon } = cardAnim

@@ -1,10 +1,9 @@
 import type { FormData, VideoOrientationId } from '../App'
 import { drawFrame, loadImage, SLIDESHOW_TRANSITION_IDS } from './canvasRenderer'
 import { resolveLyricsForRender } from './lyricSync'
-import { extractAudioFromVideo } from './offlineVideoRenderer'
+import { ensureWebmVideo, extractAudioFromVideo } from './offlineVideoRenderer'
 import { detectFaceInImage, detectFacesInImages, type FaceBox } from './faceDetection'
 import { convertImageToAnime, isAnimeConversionAvailable } from './animeConversion'
-import { ensureWebmVideo } from './offlineVideoRenderer'
 
 function getOutputDimensions(
   resolution: '720p' | '1080p' | '4k',
@@ -427,6 +426,7 @@ export async function recordVideoRealtimeWebm(form: FormData, cb: RealtimeRecord
         instrumental: form.instrumental,
         cardStyle: form.cardStyle,
         cardAutoHideSeconds: form.cardAutoHide ? form.cardAutoHideSeconds : undefined,
+        cardAutoHideShowCount: form.cardAutoHide ? form.cardAutoHideShowCount : undefined,
         slideshowImages: slideshowImages.length > 0 ? slideshowImages : undefined,
         slideshowCurrentIndex,
         slideshowTransitionProgress,
@@ -475,6 +475,7 @@ export async function recordVideoRealtimeWebm(form: FormData, cb: RealtimeRecord
           instrumental: form.instrumental,
           cardStyle: form.cardStyle,
           cardAutoHideSeconds: form.cardAutoHide ? form.cardAutoHideSeconds : undefined,
+          cardAutoHideShowCount: form.cardAutoHide ? form.cardAutoHideShowCount : undefined,
           slideshowImages: slideshowImages.length > 0 ? slideshowImages : undefined,
           slideshowCurrentIndex: 0,
           slideshowTransitionProgress: 0,
