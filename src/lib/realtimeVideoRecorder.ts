@@ -427,6 +427,8 @@ export async function recordVideoRealtimeWebm(form: FormData, cb: RealtimeRecord
         instrumental: form.instrumental,
         cardStyle: form.cardStyle,
         cardAutoHideSeconds: form.cardAutoHide ? form.cardAutoHideSeconds : undefined,
+        cardReappearCount: form.cardAutoHide ? form.cardReappearCount : undefined,
+        cardReappearVisibleSeconds: form.cardAutoHide ? form.cardReappearVisibleSeconds : undefined,
         slideshowImages: slideshowImages.length > 0 ? slideshowImages : undefined,
         slideshowCurrentIndex,
         slideshowTransitionProgress,
@@ -435,6 +437,8 @@ export async function recordVideoRealtimeWebm(form: FormData, cb: RealtimeRecord
         videoAnimation: form.videoAnimation ?? 'kenBurns',
         faceBox: currentFaceBox,
         animeFrames: animeKeyframes.length > 0 ? { images: animeKeyframes, intervalMs: 1000 } : undefined,
+        socialCtaEnabled: form.socialCtaEnabled,
+        socialCtaCount: form.socialCtaCount,
       })
 
       if (typeof videoTrack?.requestFrame === 'function') videoTrack.requestFrame()
@@ -475,6 +479,8 @@ export async function recordVideoRealtimeWebm(form: FormData, cb: RealtimeRecord
           instrumental: form.instrumental,
           cardStyle: form.cardStyle,
           cardAutoHideSeconds: form.cardAutoHide ? form.cardAutoHideSeconds : undefined,
+          cardReappearCount: form.cardAutoHide ? form.cardReappearCount : undefined,
+          cardReappearVisibleSeconds: form.cardAutoHide ? form.cardReappearVisibleSeconds : undefined,
           slideshowImages: slideshowImages.length > 0 ? slideshowImages : undefined,
           slideshowCurrentIndex: 0,
           slideshowTransitionProgress: 0,
@@ -483,6 +489,8 @@ export async function recordVideoRealtimeWebm(form: FormData, cb: RealtimeRecord
           videoAnimation: form.videoAnimation ?? 'kenBurns',
           faceBox,
           animeFrames: animeKeyframes.length > 0 ? { images: animeKeyframes, intervalMs: 1000 } : undefined,
+          socialCtaEnabled: form.socialCtaEnabled,
+          socialCtaCount: form.socialCtaCount,
         })
         if (typeof videoTrack?.requestFrame === 'function') videoTrack.requestFrame()
       } catch {

@@ -100,6 +100,10 @@ export type FormData = {
   cardAutoHide: boolean
   /** Seconds after which the card should start disappearing (only when cardAutoHide is true) */
   cardAutoHideSeconds: number
+  /** After the first hide: how many times the card reappears (0 = stay hidden). Only when cardAutoHide. */
+  cardReappearCount: number
+  /** How long the card stays fully visible on each reappearance, in seconds (enter/exit add ~1s each). */
+  cardReappearVisibleSeconds: number
   /** When main media is video: animation applied to the video (zoom, pan, etc.) */
   videoAnimation: VideoAnimationId
   /** When main visual is image/slideshow: detect face with AI and apply gentle nod animation */
@@ -122,6 +126,10 @@ export type FormData = {
   convertMp4InputToWebm: boolean
   /** Local Whisper API URL (e.g. http://127.0.0.1:8002 for faster-whisper-server). When set, used for lyric extraction instead of Replicate or in-browser model. */
   localWhisperUrl: string
+  /** When true, show animated audience prompts (like, subscribe, bell, comment) spaced through the video */
+  socialCtaEnabled: boolean
+  /** How many times the prompt sequence appears (evenly distributed over the video length) */
+  socialCtaCount: number
 }
 
 export type VideoOrientationId = '16:9' | '9:16' | '1:1' | '4:5'
@@ -162,6 +170,8 @@ const initialForm: FormData = {
   cardStyle: 'slide',
   cardAutoHide: false,
   cardAutoHideSeconds: 8,
+  cardReappearCount: 0,
+  cardReappearVisibleSeconds: 6,
   videoAnimation: 'kenBurns',
   faceNodAnimation: false,
   convertToAnime: false,
@@ -173,6 +183,8 @@ const initialForm: FormData = {
   outputFormat: 'mp4',
   convertMp4InputToWebm: false,
   localWhisperUrl: 'http://127.0.0.1:8002',
+  socialCtaEnabled: false,
+  socialCtaCount: 3,
 }
 
 export default function App() {
@@ -649,26 +661,104 @@ export default function App() {
                       </span>
                     </label>
                     {form.cardAutoHide && (
-                      <div className="flex items-center gap-3">
-                        <span className="text-slate-400 text-sm">Show card for</span>
-                        <input
-                          type="number"
-                          min={2}
-                          max={120}
-                          value={form.cardAutoHideSeconds}
-                          onChange={(e) => {
-                            const v = Number(e.target.value)
-                            const sec = !Number.isNaN(v) ? Math.max(2, Math.min(120, v)) : 8
-                            setForm((f) => ({ ...f, cardAutoHideSeconds: sec }))
-                          }}
-                          className="w-20 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-white focus:border-violet-500/50 outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                        />
-                        <span className="text-slate-400 text-sm">seconds, then fade out</span>
+                      <div className="space-y-3">
+                        <div className="flex flex-wrap items-center gap-3">
+                          <span className="text-slate-400 text-sm">Show card for</span>
+                          <input
+                            type="number"
+                            min={2}
+                            max={120}
+                            value={form.cardAutoHideSeconds}
+                            onChange={(e) => {
+                              const v = Number(e.target.value)
+                              const sec = !Number.isNaN(v) ? Math.max(2, Math.min(120, v)) : 8
+                              setForm((f) => ({ ...f, cardAutoHideSeconds: sec }))
+                            }}
+                            className="w-20 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-white focus:border-violet-500/50 outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                          />
+                          <span className="text-slate-400 text-sm">seconds, then fade out</span>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-3">
+                          <span className="text-slate-400 text-sm">Reappear</span>
+                          <select
+                            value={form.cardReappearCount}
+                            onChange={(e) =>
+                              setForm((f) => ({ ...f, cardReappearCount: Number(e.target.value) }))
+                            }
+                            className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-white focus:border-violet-500/50 outline-none"
+                          >
+                            {Array.from({ length: 16 }, (_, i) => (
+                              <option key={i} value={i}>
+                                {i === 0 ? 'Never (stay hidden)' : `${i}× through rest of video`}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        {form.cardReappearCount > 0 && (
+                          <div className="flex flex-wrap items-center gap-3">
+                            <span className="text-slate-400 text-sm">Visible each time for</span>
+                            <input
+                              type="number"
+                              min={2}
+                              max={120}
+                              value={form.cardReappearVisibleSeconds}
+                              onChange={(e) => {
+                                const v = Number(e.target.value)
+                                const sec = !Number.isNaN(v) ? Math.max(2, Math.min(120, v)) : 6
+                                setForm((f) => ({ ...f, cardReappearVisibleSeconds: sec }))
+                              }}
+                              className="w-20 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-white focus:border-violet-500/50 outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                            />
+                            <span className="text-slate-400 text-sm">
+                              seconds (plus enter/exit animation)
+                            </span>
+                          </div>
+                        )}
                       </div>
                     )}
                     <p className="text-slate-500 text-xs">
-                      The card will appear with the selected style, stay visible for the chosen time, then disappear using the same animation in reverse.
+                      First appearance uses your card style, then hides. If you choose reappearances, the card pops back in evenly across the remaining duration; each pop stays visible for the seconds you set, with the same style in and out.
                     </p>
+                  </div>
+                )}
+              </motion.div>
+
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.185 }}
+                className="rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm p-6"
+              >
+                <h3 className="text-lg font-semibold text-slate-200 mb-2">Audience prompts</h3>
+                <p className="text-slate-500 text-sm mb-3">
+                  Optional animated callouts (like, subscribe, notification bell, comment) for YouTube-style videos. Each run cycles through all four with smooth motion; repeats are spread evenly from start to finish.
+                </p>
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={form.socialCtaEnabled}
+                    onChange={(e) => setForm((f) => ({ ...f, socialCtaEnabled: e.target.checked }))}
+                    className="rounded border-white/20 bg-white/5 text-violet-500 focus:ring-violet-500"
+                  />
+                  <span className="text-slate-300">Show audience prompts on video</span>
+                </label>
+                {form.socialCtaEnabled && (
+                  <div className="mt-4 flex flex-wrap items-center gap-3">
+                    <span className="text-slate-400 text-sm">Appear</span>
+                    <select
+                      value={form.socialCtaCount}
+                      onChange={(e) =>
+                        setForm((f) => ({ ...f, socialCtaCount: Number(e.target.value) }))
+                      }
+                      className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-white focus:border-violet-500/50 outline-none"
+                    >
+                      {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => (
+                        <option key={n} value={n}>
+                          {n}×{n === 1 ? ' (once)' : ' through video'}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="text-slate-500 text-sm">Each appearance shows all four prompts in sequence.</span>
                   </div>
                 )}
               </motion.div>

@@ -1,0 +1,48 @@
+# Dependencies
+node_modules/
+
+# Production build (Vite)
+dist/
+
+# Electron packager output (electron-builder → directories.output)
+release/
+
+# TypeScript incremental / project references
+*.tsbuildinfo
+
+# Environment & secrets (Vite: VITE_*)
+.env
+.env.*
+!.env.example
+
+# Logs & debug
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editors / IDE
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+*.swo
+*~
+
+# Optional local Vite config overrides
+vite.config.*.timestamp-*
+vite.config.local.*
+
+# Test coverage
+coverage/
+
+# Temp or cached scraper/player dumps in repo root
+*-player-script.js

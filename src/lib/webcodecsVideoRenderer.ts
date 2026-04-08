@@ -428,6 +428,8 @@ export async function renderVideoWebCodecs(
         instrumental: form.instrumental,
         cardStyle: form.cardStyle,
         cardAutoHideSeconds: form.cardAutoHide ? form.cardAutoHideSeconds : undefined,
+        cardReappearCount: form.cardAutoHide ? form.cardReappearCount : undefined,
+        cardReappearVisibleSeconds: form.cardAutoHide ? form.cardReappearVisibleSeconds : undefined,
         slideshowImages: slideshowImages.length > 0 ? slideshowImages : undefined,
         slideshowCurrentIndex,
         slideshowTransitionProgress,
@@ -436,6 +438,8 @@ export async function renderVideoWebCodecs(
         videoAnimation: form.videoAnimation ?? 'kenBurns',
         faceBox: currentFaceBox,
         animeFrames: animeKeyframes.length > 0 ? { images: animeKeyframes, intervalMs: 1000 } : undefined,
+        socialCtaEnabled: form.socialCtaEnabled,
+        socialCtaCount: form.socialCtaCount,
       })
 
       const frame = new VideoFrame(canvas, { timestamp: timestampUs, duration: frameDurationUs })
