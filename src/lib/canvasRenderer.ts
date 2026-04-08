@@ -190,7 +190,6 @@ function drawLyricWithStyle(
     else if (duration - elapsed < fadeEffect.fadeOut) alpha = Math.max(0, (duration - elapsed) / fadeEffect.fadeOut)
   }
   if (alpha < 1) ctx.globalAlpha *= alpha
-  const fillColor = assStyle.color ?? fallbackColor
   const scaledOutline = Math.max(0.5, assStyle.outlineWidth * scale)
   const scaledShadow = Math.max(0.5, assStyle.shadowDepth * scale)
   const hasOutline = (assStyle.outlineWidth > 0 || assStyle.outlineColor) && assStyle.outlineColor
@@ -360,6 +359,395 @@ function applyAssStyle(
   return { x, y, scale }
 }
 
+function easeOutBackSocial(t: number): number {
+  const c1 = 1.70158
+  const c3 = c1 + 1
+  return 1 + c3 * (t - 1) ** 3 + c1 * (t - 1) ** 2
+}
+
+type SocialCtaStepId = 'like' | 'subscribe' | 'bell' | 'comment'
+
+function drawThumbsUpIcon(ctx: CanvasRenderingContext2D, cx: number, cy: number, unit: number, fill: string) {
+  ctx.save()
+  ctx.fillStyle = fill
+  ctx.translate(cx, cy)
+  const s = unit / 24
+  ctx.scale(s, s)
+  ctx.beginPath()
+  ctx.moveTo(-4, 10)
+  ctx.lineTo(-4, 2)
+  ctx.quadraticCurveTo(-4, -2, 0, -4)
+  ctx.lineTo(10, -4)
+  ctx.quadraticCurveTo(14, -4, 14, 0)
+  ctx.lineTo(14, 8)
+  ctx.quadraticCurveTo(14, 12, 10, 12)
+  ctx.lineTo(2, 12)
+  ctx.quadraticCurveTo(-4, 12, -4, 10)
+  ctx.closePath()
+  ctx.fill()
+  ctx.fillRect(-10, 0, 6, 14)
+  ctx.restore()
+}
+
+function drawBellShape(ctx: CanvasRenderingContext2D, cx: number, cy: number, unit: number, fill: string, stroke: string) {
+  ctx.save()
+  ctx.translate(cx, cy)
+  const s = unit / 22
+  ctx.scale(s, s)
+  ctx.fillStyle = fill
+  ctx.strokeStyle = stroke
+  ctx.lineWidth = 1.3
+  ctx.beginPath()
+  ctx.moveTo(0, -16)
+  ctx.bezierCurveTo(12, -16, 16, -2, 16, 10)
+  ctx.lineTo(16, 14)
+  ctx.lineTo(-16, 14)
+  ctx.lineTo(-16, 10)
+  ctx.bezierCurveTo(-16, -2, -12, -16, 0, -16)
+  ctx.closePath()
+  ctx.fill()
+  ctx.stroke()
+  ctx.fillStyle = 'rgba(35,30,18,0.95)'
+  ctx.beginPath()
+  ctx.moveTo(-8, 14)
+  ctx.lineTo(8, 14)
+  ctx.lineTo(6, 19)
+  ctx.lineTo(-6, 19)
+  ctx.closePath()
+  ctx.fill()
+  ctx.restore()
+}
+
+function drawChatBubbleIcon(ctx: CanvasRenderingContext2D, cx: number, cy: number, unit: number) {
+  const w = unit * 2.1
+  const h = unit * 1.45
+  const x = cx - w / 2
+  const y = cy - h / 2
+  const r = unit * 0.35
+  ctx.save()
+  ctx.fillStyle = 'rgba(75,115,255,0.98)'
+  ctx.strokeStyle = 'rgba(255,255,255,0.65)'
+  ctx.lineWidth = Math.max(2, unit * 0.1)
+  const bodyH = h * 0.68
+  roundRect(ctx, x, y, w, bodyH, r)
+  ctx.fill()
+  ctx.stroke()
+  ctx.fillStyle = 'rgba(75,115,255,0.98)'
+  ctx.beginPath()
+  ctx.moveTo(cx - unit * 0.35, y + bodyH - 1)
+  ctx.lineTo(cx, y + h * 0.92)
+  ctx.lineTo(cx + unit * 0.55, y + bodyH - 1)
+  ctx.closePath()
+  ctx.fill()
+  ctx.stroke()
+  ctx.fillStyle = 'rgba(255,255,255,0.9)'
+  const dotR = unit * 0.12
+  for (let i = -1; i <= 1; i++) {
+    ctx.beginPath()
+    ctx.arc(cx + i * unit * 0.32, y + bodyH * 0.45, dotR, 0, Math.PI * 2)
+    ctx.fill()
+  }
+  ctx.restore()
+}
+
+/** Animated like → subscribe → bell → comment prompts, evenly spaced through the timeline. */
+function drawSocialCtaOverlay(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  timeMs: number,
+  durationMs: number,
+  appearances: number
+) {
+  const count = Math.max(1, Math.min(10, Math.round(appearances) || 1))
+  if (durationMs <= 200) return
+
+  const segmentLen = durationMs / count
+  /** Longer on-screen time: prefer ~8–14s when the segment allows, never wider than the slot. */
+  const targetBurst = Math.max(7800, Math.min(14500, segmentLen * 0.88))
+  const burstMs = Math.min(segmentLen * 0.96, Math.max(4200, targetBurst))
+
+  let localT = -1
+  for (let i = 0; i < count; i++) {
+    const center = segmentLen * (i + 0.5)
+    const start = center - burstMs / 2
+    const end = center + burstMs / 2
+    if (timeMs >= start && timeMs <= end) {
+      localT = timeMs - start
+      break
+    }
+  }
+  if (localT < 0) return
+
+  const u = localT / burstMs
+  /** Slow fade in/out so the panel stays clearly visible most of the burst */
+  let masterA = 1
+  if (u < 0.1) masterA = u / 0.1
+  if (u > 0.82) masterA = Math.max(0, (1 - u) / 0.18)
+
+  /** Wider steps + narrow crossfade = longer full-opacity reads */
+  const phases: { id: SocialCtaStepId; t0: number; t1: number }[] = [
+    { id: 'like', t0: 0.01, t1: 0.28 },
+    { id: 'subscribe', t0: 0.24, t1: 0.52 },
+    { id: 'bell', t0: 0.48, t1: 0.78 },
+    { id: 'comment', t0: 0.74, t1: 0.995 },
+  ]
+
+  const strength = (t0: number, t1: number) => {
+    const w = 0.038
+    if (u < t0) return 0
+    if (u < t0 + w) return (u - t0) / w
+    if (u > t1 - w && u <= t1) return (t1 - u) / w
+    if (u > t1) return 0
+    return 1
+  }
+
+  let best: SocialCtaStepId = 'like'
+  let bestStr = 0
+  for (const ph of phases) {
+    const s = strength(ph.t0, ph.t1)
+    if (s > bestStr) {
+      bestStr = s
+      best = ph.id
+    }
+  }
+  if (bestStr < 0.008) return
+
+  const ph = phases.find((p) => p.id === best)!
+  const span = Math.max(0.08, ph.t1 - ph.t0)
+  const innerU = Math.min(1, Math.max(0, (u - ph.t0) / span))
+  const pop = easeOutBackSocial(Math.min(1, innerU / 0.2))
+  const iconScale = 0.78 + pop * 0.28
+  const fade = masterA * bestStr
+
+  const pad = Math.min(width, height) * 0.028
+  const panelW = Math.min(width * 0.52, 400)
+  const panelH = Math.min(height * 0.32, 248)
+  const panelX = width - panelW - pad
+  const panelY = height - panelH - pad * 1.25
+  const cx = panelX + panelW * 0.5
+  const iconY = panelY + panelH * 0.34
+  const uScale = Math.min(width, height) / 1080
+
+  ctx.save()
+  ctx.globalAlpha *= fade
+
+  ctx.shadowColor = 'rgba(0,0,0,0.65)'
+  ctx.shadowBlur = 28 * uScale
+  ctx.shadowOffsetY = 8 * uScale
+  const g = ctx.createLinearGradient(panelX, panelY, panelX + panelW, panelY + panelH)
+  g.addColorStop(0, 'rgba(14,12,24,0.97)')
+  g.addColorStop(0.5, 'rgba(22,18,38,0.96)')
+  g.addColorStop(1, 'rgba(8,8,16,0.98)')
+  ctx.fillStyle = g
+  roundRect(ctx, panelX, panelY, panelW, panelH, 22 * uScale)
+  ctx.fill()
+  ctx.shadowBlur = 0
+  ctx.shadowOffsetY = 0
+
+  ctx.strokeStyle = 'rgba(255,255,255,0.32)'
+  ctx.lineWidth = 2.2 * uScale
+  roundRect(ctx, panelX, panelY, panelW, panelH, 22 * uScale)
+  ctx.stroke()
+
+  ctx.save()
+  ctx.translate(cx, iconY)
+  ctx.scale(iconScale, iconScale)
+  ctx.translate(-cx, -iconY)
+
+  const unit = 32 * uScale
+
+  if (best === 'like') {
+    const pulse = 0.55 + 0.45 * Math.sin(timeMs * 0.006)
+    for (let ring = 0; ring < 2; ring++) {
+      ctx.save()
+      ctx.globalAlpha *= (0.35 + pulse * 0.2) * (1 - ring * 0.28)
+      ctx.strokeStyle = 'rgba(255,120,160,0.85)'
+      ctx.lineWidth = 3 * uScale
+      ctx.beginPath()
+      ctx.arc(cx, iconY, unit * (1.12 + ring * 0.3), 0, Math.PI * 2)
+      ctx.stroke()
+      ctx.restore()
+    }
+    ctx.globalAlpha = fade
+    drawThumbsUpIcon(ctx, cx, iconY, unit * 1.25, '#ffffff')
+    ctx.save()
+    ctx.fillStyle = '#ff4d8a'
+    ctx.globalAlpha = fade * (0.85 + 0.15 * pulse)
+    ctx.beginPath()
+    ctx.arc(cx + unit * 0.88, iconY - unit * 0.42, unit * 0.32, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.restore()
+    ctx.globalAlpha = fade
+  } else if (best === 'subscribe') {
+    const pillW = 236 * uScale
+    const pillH = 52 * uScale
+    const px = cx - pillW / 2
+    const py = iconY - pillH / 2
+    const bounce = 1 + 0.038 * Math.sin(timeMs * 0.009)
+    ctx.save()
+    ctx.translate(cx, iconY)
+    ctx.scale(bounce, bounce)
+    ctx.translate(-cx, -iconY)
+    const rg = ctx.createLinearGradient(px, py, px + pillW, py)
+    rg.addColorStop(0, '#ff3344')
+    rg.addColorStop(1, '#b01028')
+    ctx.fillStyle = rg
+    roundRect(ctx, px, py, pillW, pillH, pillH / 2)
+    ctx.fill()
+    ctx.strokeStyle = 'rgba(255,255,255,0.45)'
+    ctx.lineWidth = 2.4 * uScale
+    roundRect(ctx, px, py, pillW, pillH, pillH / 2)
+    ctx.stroke()
+    ctx.font = `800 ${Math.round(17 * uScale)}px Outfit, system-ui, sans-serif`
+    ctx.fillStyle = '#fff'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText('SUBSCRIBE', cx, py + pillH / 2)
+    ctx.restore()
+  } else if (best === 'bell') {
+    const wob = Math.sin(timeMs * 0.012) * 0.14
+    ctx.save()
+    ctx.translate(cx, iconY)
+    ctx.rotate(wob)
+    ctx.translate(-cx, -iconY)
+    drawBellShape(ctx, cx, iconY, unit * 1.15, '#ffcc33', 'rgba(0,0,0,0.35)')
+    ctx.restore()
+    const rt = (timeMs % 1100) / 1100
+    ctx.save()
+    ctx.globalAlpha *= 0.55 * (1 - rt)
+    ctx.strokeStyle = 'rgba(255,240,180,0.95)'
+    ctx.lineWidth = 3 * uScale
+    ctx.beginPath()
+    ctx.arc(cx, iconY, unit * (1.22 + rt * 0.42), -Math.PI * 0.75, Math.PI * 0.75)
+    ctx.stroke()
+    ctx.restore()
+    ctx.globalAlpha = fade
+  } else {
+    drawChatBubbleIcon(ctx, cx, iconY, unit)
+  }
+
+  ctx.restore()
+
+  const titleSz = Math.round(26 * uScale)
+  const subSz = Math.round(15 * uScale)
+  const strokeW = Math.max(2.5, 3.2 * uScale)
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.lineJoin = 'round'
+  ctx.miterLimit = 2
+
+  const drawReadableLine = (text: string, y: number, font: string, fill: string, withStroke: boolean) => {
+    ctx.font = font
+    if (withStroke) {
+      ctx.strokeStyle = 'rgba(0,0,0,0.82)'
+      ctx.lineWidth = strokeW
+      ctx.strokeText(text, cx, y)
+    }
+    ctx.fillStyle = fill
+    ctx.fillText(text, cx, y)
+  }
+
+  const ty = panelY + panelH * 0.69
+  const sy = panelY + panelH * 0.86
+  if (best === 'like') {
+    drawReadableLine(
+      'Smash like',
+      ty,
+      `700 ${titleSz}px Outfit, system-ui, sans-serif`,
+      '#ffffff',
+      true
+    )
+    drawReadableLine(
+      'if you enjoy this track',
+      sy,
+      `600 ${subSz}px Outfit, system-ui, sans-serif`,
+      'rgba(255,225,235,0.98)',
+      true
+    )
+  } else if (best === 'subscribe') {
+    drawReadableLine('Join the channel', ty, `700 ${titleSz}px Outfit, system-ui, sans-serif`, '#ffffff', true)
+    drawReadableLine(
+      'for more music videos',
+      sy,
+      `600 ${subSz}px Outfit, system-ui, sans-serif`,
+      'rgba(230,228,248,0.98)',
+      true
+    )
+  } else if (best === 'bell') {
+    drawReadableLine('Hit the bell', ty, `700 ${titleSz}px Outfit, system-ui, sans-serif`, '#ffffff', true)
+    drawReadableLine(
+      'never miss an upload',
+      sy,
+      `600 ${subSz}px Outfit, system-ui, sans-serif`,
+      'rgba(235,232,255,0.98)',
+      true
+    )
+  } else {
+    drawReadableLine('Leave a comment', ty, `700 ${titleSz}px Outfit, system-ui, sans-serif`, '#ffffff', true)
+    drawReadableLine(
+      'say hi or share a lyric',
+      sy,
+      `600 ${subSz}px Outfit, system-ui, sans-serif`,
+      'rgba(200,220,255,0.98)',
+      true
+    )
+  }
+
+  ctx.restore()
+}
+
+/** Card auto-hide: first show, exit, then optional evenly spaced re-entries (enter → hold → exit each). */
+function resolveCardAutoHideState(
+  timeMs: number,
+  durationMs: number,
+  cardAutoHideSeconds: number,
+  reappearCount: number,
+  reappearVisibleSec: number
+): { visible: boolean; timeForAnim: number } {
+  const hideStart = cardAutoHideSeconds * 1000
+  const firstExitEnd = hideStart + CARD_ENTRANCE_MS
+
+  if (timeMs < hideStart) {
+    return { visible: true, timeForAnim: timeMs }
+  }
+  if (timeMs < firstExitEnd) {
+    return { visible: true, timeForAnim: Math.max(0, CARD_ENTRANCE_MS - (timeMs - hideStart)) }
+  }
+
+  const n = Math.max(0, Math.min(15, Math.floor(reappearCount)))
+  if (n <= 0) {
+    return { visible: false, timeForAnim: timeMs }
+  }
+
+  let holdMs = Math.max(600, reappearVisibleSec * 1000)
+  let blockLen = 2 * CARD_ENTRANCE_MS + holdMs
+  const remaining = durationMs - firstExitEnd
+  if (remaining < CARD_ENTRANCE_MS + 200) {
+    return { visible: false, timeForAnim: timeMs }
+  }
+
+  let gap = (remaining - n * blockLen) / (n + 1)
+  if (gap < 0) {
+    holdMs = Math.max(400, (remaining / n) - 2 * CARD_ENTRANCE_MS - 40)
+    blockLen = 2 * CARD_ENTRANCE_MS + holdMs
+    gap = Math.max(0, (remaining - n * blockLen) / (n + 1))
+  }
+
+  for (let i = 0; i < n; i++) {
+    const bs = firstExitEnd + gap * (i + 1) + blockLen * i
+    const be = bs + blockLen
+    if (timeMs >= bs && timeMs < be) {
+      const loc = timeMs - bs
+      if (loc < CARD_ENTRANCE_MS) return { visible: true, timeForAnim: loc }
+      if (loc < CARD_ENTRANCE_MS + holdMs) return { visible: true, timeForAnim: CARD_ENTRANCE_MS }
+      return { visible: true, timeForAnim: Math.max(0, CARD_ENTRANCE_MS - (loc - CARD_ENTRANCE_MS - holdMs)) }
+    }
+  }
+
+  return { visible: false, timeForAnim: timeMs }
+}
+
 export function drawFrame(
   ctx: CanvasRenderingContext2D,
   opts: {
@@ -399,6 +787,10 @@ export function drawFrame(
     cardStyle?: CardStyleId
     /** When set, the info card will start to disappear after this many seconds using the same animation mirrored */
     cardAutoHideSeconds?: number
+    /** After first hide: how many times the card comes back (0 = stay hidden). Evenly spaced in the rest of the video. */
+    cardReappearCount?: number
+    /** Seconds the card stays fully visible on each reappearance (enter/exit use the same 1s style animation) */
+    cardReappearVisibleSeconds?: number
     /** Slideshow: multiple images with transitions */
     slideshowImages?: HTMLImageElement[] | null
     slideshowCurrentIndex?: number
@@ -412,13 +804,17 @@ export function drawFrame(
     faceBox?: { x: number; y: number; width: number; height: number } | null
     /** Pre-converted anime frames (when convertToAnime was used on video); intervalMs between frames */
     animeFrames?: { images: HTMLImageElement[]; intervalMs: number } | null
+    /** Audience prompts: like → subscribe → bell → comment, spaced through the video */
+    socialCtaEnabled?: boolean
+    /** How many times the full sequence appears (evenly distributed) */
+    socialCtaCount?: number
   }
 ) {
   if (opts.instrumental) {
     drawInstrumentalFrame(ctx, opts)
     return
   }
-  const { width, height, timeMs, durationMs, style, image, frontVideo, title, artist, album, lyricsParsed, spectrumBars, audioLevel, visualizer, backgroundEffect, particleEffect, imageOpacityWithEffect, backgroundVideo, frontImageOpacityWhenVideo, visualizerSize, visualizerPosition, lyricPosition = 'card', visualizerPlacement = 'screen', lyricStyleOverrides, cardStyle, cardAutoHideSeconds, slideshowImages, slideshowCurrentIndex = 0, slideshowTransitionProgress = 0, slideshowTransition = 'fade', slideshowSlideDurationMs, videoAnimation: videoAnimationOpt = 'kenBurns', faceBox, animeFrames } = opts
+  const { width, height, timeMs, durationMs, style, image, frontVideo, title, artist, album, lyricsParsed, spectrumBars, audioLevel, visualizer, backgroundEffect, particleEffect, imageOpacityWithEffect, backgroundVideo, frontImageOpacityWhenVideo, visualizerSize, visualizerPosition, lyricPosition = 'card', visualizerPlacement = 'screen', lyricStyleOverrides, cardStyle, cardAutoHideSeconds, cardReappearCount = 0, cardReappearVisibleSeconds = 6, slideshowImages, slideshowCurrentIndex = 0, slideshowTransitionProgress = 0, slideshowTransition = 'fade', slideshowSlideDurationMs, videoAnimation: videoAnimationOpt = 'kenBurns', faceBox, animeFrames, socialCtaEnabled, socialCtaCount = 3 } = opts
   const videoAnimation = videoAnimationOpt ?? 'kenBurns'
   const hasSlideshow = slideshowImages && slideshowImages.length > 0
   const hasImage = !!(image && image.complete && image.naturalWidth > 0)
@@ -605,22 +1001,36 @@ export function drawFrame(
   const vizOnScreen = visualizerPlacement === 'screen'
   const vizInCard = visualizerPlacement === 'card'
   const cardInsetX = width * 0.02
-  // Card timing: optional auto-hide after N seconds, using the same entrance animation mirrored for exit.
+  // Card timing: optional auto-hide after N seconds; optional reappearances spread through the rest of the video.
   let cardVisible = true
   let cardTimeForAnim = timeMs
   if (cardStyleId !== 'none' && typeof cardAutoHideSeconds === 'number' && cardAutoHideSeconds > 0) {
-    const hideStartMs = cardAutoHideSeconds * 1000
-    if (timeMs >= hideStartMs) {
-      const elapsedSinceHide = timeMs - hideStartMs
-      if (elapsedSinceHide >= CARD_ENTRANCE_MS) {
-        cardVisible = false
-      } else {
-        cardTimeForAnim = Math.max(0, CARD_ENTRANCE_MS - elapsedSinceHide)
+    if (cardReappearCount > 0) {
+      const st = resolveCardAutoHideState(
+        timeMs,
+        durationMs,
+        cardAutoHideSeconds,
+        cardReappearCount,
+        cardReappearVisibleSeconds
+      )
+      cardVisible = st.visible
+      cardTimeForAnim = st.timeForAnim
+    } else {
+      const hideStartMs = cardAutoHideSeconds * 1000
+      if (timeMs >= hideStartMs) {
+        const elapsedSinceHide = timeMs - hideStartMs
+        if (elapsedSinceHide >= CARD_ENTRANCE_MS) {
+          cardVisible = false
+        } else {
+          cardTimeForAnim = Math.max(0, CARD_ENTRANCE_MS - elapsedSinceHide)
+        }
       }
     }
   }
   const cardAnim = getCardAnimation(cardStyleId, cardTimeForAnim, width, height, margin)
   const { drawX: drawCardX, drawY: cardY, cardW, cardH, scale: cardScale, alpha: cardAlpha, radius: cardRadius, useGlass: cardUseGlass, useNeon: cardUseNeon } = cardAnim
+  const layoutCardAnim = getCardAnimation(cardStyleId, CARD_ENTRANCE_MS, width, height, margin)
+  const vizCardY = cardVisible ? cardY : layoutCardAnim.drawY
 
   // —— Visualizer on video (strip or full area) when visualizer placement is screen ——
   const isFullSize = vizSize === 'full'
@@ -639,7 +1049,7 @@ export function drawFrame(
       videoVizY = (height - videoVizH) / 2
     } else {
       const gapAboveCard = 10
-      videoVizY = cardY - videoVizH - gapAboveCard
+      videoVizY = vizCardY - videoVizH - gapAboveCard
     }
     ctx.save()
     roundRect(ctx, videoVizX, videoVizY, videoVizW, videoVizH, 14)
@@ -1083,12 +1493,16 @@ export function drawFrame(
     }
     ctx.restore()
   }
+
+  if (socialCtaEnabled) {
+    drawSocialCtaOverlay(ctx, width, height, timeMs, durationMs, socialCtaCount)
+  }
 }
 
 type InstrumentalOpts = Parameters<typeof drawFrame>[1]
 
 function drawInstrumentalFrame(ctx: CanvasRenderingContext2D, opts: InstrumentalOpts) {
-  const { width: w, height: h, timeMs, style, image, frontVideo, title, artist, spectrumBars, audioLevel, visualizer, backgroundEffect, particleEffect, backgroundVideo, slideshowImages, slideshowCurrentIndex = 0, videoAnimation = 'kenBurns', animeFrames } = opts
+  const { width: w, height: h, timeMs, durationMs, style, image, frontVideo, title, artist, spectrumBars, audioLevel, visualizer, backgroundEffect, particleEffect, backgroundVideo, slideshowImages, slideshowCurrentIndex = 0, videoAnimation = 'kenBurns', animeFrames, socialCtaEnabled, socialCtaCount = 3 } = opts
   const hasAnimeFrames = animeFrames?.images?.length
   const hasFrontVideo = (frontVideo && frontVideo.readyState >= 1 && frontVideo.videoWidth > 0 && frontVideo.videoHeight > 0) || !!hasAnimeFrames
   const hasSlideshow = slideshowImages && slideshowImages.length > 0
@@ -1295,6 +1709,10 @@ function drawInstrumentalFrame(ctx: CanvasRenderingContext2D, opts: Instrumental
   ctx.font = `${theme.bodyStyle ?? 'normal'} 500 ${artistSize}px ${theme.artistFont ?? 'Outfit, system-ui, sans-serif'}`
   ctx.fillStyle = 'rgba(255,255,255,0.6)'
   if (artist.trim()) ctx.fillText(artist, textPad, textY + titleSize * 1.1)
+
+  if (socialCtaEnabled) {
+    drawSocialCtaOverlay(ctx, w, h, timeMs, durationMs, socialCtaCount)
+  }
 }
 
 function easeOutCubic(x: number): number {

@@ -501,6 +501,8 @@ export async function renderVideoOfflineWebm(form: FormData, cb: OfflineRenderCa
           instrumental: form.instrumental,
           cardStyle: form.cardStyle,
           cardAutoHideSeconds: form.cardAutoHide ? form.cardAutoHideSeconds : undefined,
+          cardReappearCount: form.cardAutoHide ? form.cardReappearCount : undefined,
+          cardReappearVisibleSeconds: form.cardAutoHide ? form.cardReappearVisibleSeconds : undefined,
           slideshowImages: slideshowImages.length > 0 ? slideshowImages : undefined,
           slideshowCurrentIndex,
           slideshowTransitionProgress,
@@ -509,6 +511,8 @@ export async function renderVideoOfflineWebm(form: FormData, cb: OfflineRenderCa
           videoAnimation: form.videoAnimation ?? 'kenBurns',
           faceBox: currentFaceBox,
           animeFrames: animeKeyframes.length > 0 ? { images: animeKeyframes, intervalMs: 1000 } : undefined,
+          socialCtaEnabled: form.socialCtaEnabled,
+          socialCtaCount: form.socialCtaCount,
         })
 
         const frameBlob = await new Promise<Blob>((resolve, reject) => {
