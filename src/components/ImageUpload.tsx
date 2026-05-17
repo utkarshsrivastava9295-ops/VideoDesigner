@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react'
 import { motion } from 'framer-motion'
 import type { MainMedia } from '../App'
+import { concatMp4VideoBlobs, ensureWebmVideo } from '../lib/offlineVideoRenderer'
 
 declare global {
   interface Window {
@@ -16,12 +17,85 @@ type Props = {
   onSelect: (mainMedia: MainMedia | null) => void
 }
 
-const YOUTUBE_URL_REGEX = /^(https?:\/\/)?(www\.)?(youtube\.com\/watch\?v=|youtu\.be\/)/i
+function stripUrl(u: string): string | null {
+  const t = u.trim()
+  if (!t) return null
+  const withProto = /^https?:\/\//i.test(t) ? t : `https://${t.replace(/^\/+/, '')}`
+  return withProto.trim()
+}
+
+/** Watch page, Shorts, youtu.be, playlist, or /embed/ — matches what the desktop downloader accepts. */
+function isLikelyYoutubeMainVideoUrl(url: string): boolean {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return false
+  }
+  const host = parsed.hostname.replace(/^www\./i, '').toLowerCase()
+  const path = parsed.pathname
+  const q = parsed.search
+  if (host === 'youtu.be') {
+    return /^\/[\w-]{11}\b/.test(path)
+  }
+  if (host === 'youtube.com' || host === 'm.youtube.com' || host === 'music.youtube.com' || host === 'gaming.youtube.com') {
+    if (path.startsWith('/shorts/')) return /\/shorts\/[\w-]{11}\b/.test(path)
+    if (path.startsWith('/embed/')) return /\/embed\/[\w-]{11}\b/.test(path)
+    if (path.startsWith('/playlist')) return /[?&]list=[\w-]+/.test(q)
+    if (path === '/watch' || path.startsWith('/watch')) return /[?&]v=[\w-]{11}\b/.test(q)
+  }
+  return false
+}
+
+/** Trim brackets / quotes copied around links from chat, Markdown, Slack, etc. */
+function trimUrlCopiedEdges(s: string): string {
+  return s
+    .trim()
+    .replace(/^[('"[(]+\s*/, '')
+    .replace(/[.,;:)\]}"'\]\s]*$/g, '')
+    .trim()
+}
+
+/** Resolve to a canonical https URL for parsing (same hosts as isLikelyYoutubeMainVideoUrl). */
+function normalizedYoutubeCandidate(cand: string): string | null {
+  const t = trimUrlCopiedEdges(cand)
+  if (!t) return null
+  const withProto = /^https?:\/\//i.test(t) ? t : stripUrl(t)
+  return withProto?.trim() || null
+}
+
+/**
+ * Detect all YouTube URLs in pasted text: space- or comma-separated lines, prose, bullets.
+ * Hits are merged and ordered by position in the string so order matches what you pasted.
+ */
+function parseYoutubeUrlList(raw: string): string[] {
+  type Hit = { idx: number; cand: string }
+  const hits: Hit[] = []
+
+  const scanRe =
+    /https?:\/\/(?:[\w-]+\.)*youtube\.com\/\S+|https?:\/\/(?:www\.)?youtu\.be\/\S+/gi
+  for (const m of raw.matchAll(scanRe)) hits.push({ idx: m.index, cand: m[0] })
+
+  const tokRe = /[^\s,;|\n\r\t]+/g
+  let tm: RegExpExecArray | null
+  tokRe.lastIndex = 0
+  while ((tm = tokRe.exec(raw)) !== null) hits.push({ idx: tm.index, cand: tm[0] })
+
+  const earliestPos = new Map<string, number>()
+  for (const { idx, cand } of hits) {
+    const u = normalizedYoutubeCandidate(cand)
+    if (!u || !isLikelyYoutubeMainVideoUrl(u)) continue
+    const prev = earliestPos.get(u)
+    if (prev === undefined || idx < prev) earliestPos.set(u, idx)
+  }
+  return [...earliestPos.entries()].sort((a, b) => a[1] - b[1]).map(([u]) => u)
+}
 
 export function ImageUpload({ mainMedia, onSelect }: Props) {
   const [youtubeUrl, setYoutubeUrl] = useState('')
   const [youtubeLoading, setYoutubeLoading] = useState(false)
   const [youtubeError, setYoutubeError] = useState<string | null>(null)
+  const [youtubeStatus, setYoutubeStatus] = useState<string | null>(null)
   const hasElectronAPI = typeof window !== 'undefined' && !!window.electronAPI
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
@@ -92,37 +166,58 @@ export function ImageUpload({ mainMedia, onSelect }: Props) {
   )
 
   const handleYoutubeDownload = useCallback(async () => {
-    const url = youtubeUrl.trim()
-    if (!url) {
-      setYoutubeError('Please enter a YouTube URL.')
+    const urls = parseYoutubeUrlList(youtubeUrl)
+    if (urls.length === 0) {
+      setYoutubeError('Please enter one or more YouTube URLs.')
       return
     }
-    if (!YOUTUBE_URL_REGEX.test(url)) {
-      setYoutubeError('Please enter a valid YouTube URL (e.g. https://www.youtube.com/watch?v=...)')
-      return
+    for (const url of urls) {
+      if (!isLikelyYoutubeMainVideoUrl(url)) {
+        setYoutubeError(`Invalid YouTube URL: ${url}`)
+        return
+      }
     }
     if (!window.electronAPI) {
       setYoutubeError('YouTube download is only available in the desktop app.')
       return
     }
     setYoutubeError(null)
+    setYoutubeStatus(null)
     setYoutubeLoading(true)
     try {
-      const { data: base64, mime } = await window.electronAPI.downloadYoutubeVideo(url)
-      const binary = atob(base64)
-      const bytes = new Uint8Array(binary.length)
-      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
-      const blob = new Blob([bytes], { type: mime })
-      const file = new File([blob], 'youtube-video.mp4', { type: mime })
+      const blobs: Blob[] = []
+      for (let i = 0; i < urls.length; i++) {
+        setYoutubeStatus(urls.length > 1 ? `Downloading video ${i + 1} of ${urls.length}…` : 'Downloading…')
+        const { data: base64, mime } = await window.electronAPI.downloadYoutubeVideo(urls[i])
+        const binary = atob(base64)
+        const bytes = new Uint8Array(binary.length)
+        for (let k = 0; k < binary.length; k++) bytes[k] = binary.charCodeAt(k)
+        blobs.push(new Blob([bytes], { type: mime || 'video/mp4' }))
+      }
+      if (urls.length > 1) setYoutubeStatus('Merging videos…')
+      let merged = await concatMp4VideoBlobs(blobs, {
+        onStatus: urls.length > 1 ? (msg) => setYoutubeStatus(msg ?? null) : undefined,
+      })
+      setYoutubeStatus('Preparing video for editor…')
+      const baseName = blobs.length === 1 ? 'youtube-video' : `youtube-videos-${blobs.length}`
+      merged = await ensureWebmVideo(
+        new File([merged], `${baseName}.mp4`, { type: merged.type || 'video/mp4' }),
+        { onStatus: (msg) => setYoutubeStatus(msg ?? null), convertIfMp4: false }
+      )
+      const ext = merged.type.includes('webm') ? 'webm' : 'mp4'
+      const file = new File([merged], `${baseName}.${ext}`, { type: merged.type || 'video/mp4' })
       const preview = URL.createObjectURL(file)
       onSelect({ type: 'video', file, preview })
       setYoutubeUrl('')
     } catch (err) {
       setYoutubeError(err instanceof Error ? err.message : 'Download failed. Try another video.')
     } finally {
+      setYoutubeStatus(null)
       setYoutubeLoading(false)
     }
   }, [youtubeUrl, onSelect])
+
+  const youtubeLinkCount = youtubeUrl.trim() ? parseYoutubeUrlList(youtubeUrl).length : 0
 
   const isSlideshow = mainMedia?.type === 'slideshow'
   const isVideo = mainMedia?.type === 'video'
@@ -161,15 +256,17 @@ export function ImageUpload({ mainMedia, onSelect }: Props) {
             </div>
             {hasElectronAPI && (
               <div className="mt-4 pt-4 border-t border-white/10 mx-0 pb-0">
-                <p className="text-slate-400 text-sm font-medium mb-2">Or use a YouTube video</p>
-                <p className="text-slate-500 text-xs mb-3">Paste a YouTube URL to download and use it as the main video. All options (anime, face nod, etc.) apply.</p>
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <input
-                    type="url"
+                <p className="text-slate-400 text-sm font-medium mb-2">Or use YouTube video(s)</p>
+                <p className="text-slate-500 text-xs mb-3">
+                  One URL, or several separated by spaces, commas, or new lines. They download in order and merge into one clip. Pasting &quot;youtu.be/…&quot; lines without https:// is fine.
+                </p>
+                <div className="flex flex-col sm:flex-row gap-2 sm:items-end">
+                  <textarea
+                    rows={Math.min(10, Math.max(3, youtubeUrl.split(/\r?\n/).length + 1))}
                     value={youtubeUrl}
                     onChange={(e) => { setYoutubeUrl(e.target.value); setYoutubeError(null) }}
-                    placeholder="https://www.youtube.com/watch?v=..."
-                    className="flex-1 min-w-0 px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:border-violet-500/50 outline-none text-sm"
+                    placeholder={'https://www.youtube.com/watch?v=…\nhttps://youtu.be/…'}
+                    className="flex-1 min-w-0 min-h-[52px] max-h-32 px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:border-violet-500/50 outline-none text-sm resize-y"
                     disabled={youtubeLoading}
                   />
                   <button
@@ -178,9 +275,19 @@ export function ImageUpload({ mainMedia, onSelect }: Props) {
                     disabled={youtubeLoading}
                     className="shrink-0 px-4 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-medium text-sm transition disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    {youtubeLoading ? 'Downloading…' : 'Download & use'}
+                    {youtubeLoading ? youtubeStatus || 'Working…' : 'Download & use'}
                   </button>
                 </div>
+                {youtubeLinkCount > 0 && (
+                  <p className="mt-1 text-xs text-slate-500">
+                    {youtubeLinkCount === 1
+                      ? '1 YouTube link detected'
+                      : `${youtubeLinkCount} YouTube links detected (download in this order, then merged)`}
+                  </p>
+                )}
+                {youtubeLoading && youtubeStatus && (
+                  <p className="mt-2 text-sm text-slate-400">{youtubeStatus}</p>
+                )}
                 {youtubeError && (
                   <p className="mt-2 text-sm text-red-400">{youtubeError}</p>
                 )}

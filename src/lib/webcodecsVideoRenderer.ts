@@ -5,6 +5,7 @@ import { extractAudioFromVideo } from './offlineVideoRenderer'
 import { detectFaceInImage, detectFacesInImages, type FaceBox } from './faceDetection'
 import { convertImageToAnime, isAnimeConversionAvailable } from './animeConversion'
 import { seekVideo } from './videoSeek'
+import { attachVideoForRender, detachRenderVideo } from './videoLoader'
 import { Muxer as WebmMuxer, ArrayBufferTarget as WebmTarget } from 'webm-muxer'
 import { Muxer as Mp4Muxer, ArrayBufferTarget as Mp4Target } from 'mp4-muxer'
 import { convertWebmToMp4, ensureWebmVideo } from './offlineVideoRenderer'
@@ -159,19 +160,12 @@ export async function renderVideoWebCodecs(
     if (form.mainMedia?.type === 'video') {
       console.log('[WebCodecs] Loading main video…')
       const mainVideoBlob = await ensureWebmVideo(form.mainMedia.file, { onStatus, isCancelled, convertIfMp4: form.convertMp4InputToWebm })
-      frontVideoUrl = URL.createObjectURL(mainVideoBlob)
-      frontVideo = document.createElement('video')
-      frontVideo.src = frontVideoUrl
-      frontVideo.muted = !!form.audioFile
-      frontVideo.playsInline = true
-      frontVideo.loop = true
-      frontVideo.preload = 'auto'
-      frontVideo.setAttribute('playsinline', '')
-      await new Promise<void>((resolve, reject) => {
-        frontVideo!.onloadeddata = () => resolve()
-        frontVideo!.onerror = () => reject(new Error('Video failed to load'))
-        frontVideo!.load()
+      const mainAttached = await attachVideoForRender(mainVideoBlob, {
+        muted: !!form.audioFile,
+        loop: true,
       })
+      frontVideo = mainAttached.video
+      frontVideoUrl = mainAttached.objectUrl
       if (frontVideo.duration != null && isFinite(frontVideo.duration)) {
         const mainVideoDurationMs = Math.round(frontVideo.duration * 1000)
         if (!(form.loopMainVideoToAudio && form.audioFile)) {
@@ -205,19 +199,9 @@ export async function renderVideoWebCodecs(
     if (form.videoFile) {
       console.log('[WebCodecs] Loading background video…')
       const bgVideoBlob = await ensureWebmVideo(form.videoFile, { onStatus, isCancelled, convertIfMp4: form.convertMp4InputToWebm })
-      backgroundVideoUrl = URL.createObjectURL(bgVideoBlob)
-      backgroundVideo = document.createElement('video')
-      backgroundVideo.src = backgroundVideoUrl
-      backgroundVideo.loop = true
-      backgroundVideo.muted = true
-      backgroundVideo.playsInline = true
-      backgroundVideo.preload = 'auto'
-      backgroundVideo.setAttribute('playsinline', '')
-      await new Promise<void>((resolve, reject) => {
-        backgroundVideo!.onloadeddata = () => resolve()
-        backgroundVideo!.onerror = () => reject(new Error('Video failed to load'))
-        backgroundVideo!.load()
-      })
+      const bgAttached = await attachVideoForRender(bgVideoBlob, { muted: true, loop: true })
+      backgroundVideo = bgAttached.video
+      backgroundVideoUrl = bgAttached.objectUrl
       console.log('[WebCodecs] Background video loaded')
     }
 
@@ -542,6 +526,8 @@ export async function renderVideoWebCodecs(
     return resultBlob
   } finally {
     try {
+      detachRenderVideo(frontVideo)
+      detachRenderVideo(backgroundVideo)
       if (backgroundVideoUrl) URL.revokeObjectURL(backgroundVideoUrl)
       if (frontVideoUrl) URL.revokeObjectURL(frontVideoUrl)
       convertedAnimeUrls.forEach((u) => URL.revokeObjectURL(u))

@@ -5,6 +5,7 @@ import { extractAudioFromVideo } from './offlineVideoRenderer'
 import { detectFaceInImage, detectFacesInImages, type FaceBox } from './faceDetection'
 import { convertImageToAnime, isAnimeConversionAvailable } from './animeConversion'
 import { ensureWebmVideo } from './offlineVideoRenderer'
+import { attachVideoForRender, detachRenderVideo } from './videoLoader'
 
 function getOutputDimensions(
   resolution: '720p' | '1080p' | '4k',
@@ -115,16 +116,8 @@ export async function recordVideoRealtimeWebm(form: FormData, cb: RealtimeRecord
       // ignore
     }
     try {
-      if (backgroundVideo) {
-        backgroundVideo.pause()
-        backgroundVideo.removeAttribute('src')
-        if (backgroundVideo.parentNode) backgroundVideo.parentNode.removeChild(backgroundVideo)
-      }
-      if (frontVideo) {
-        frontVideo.pause()
-        frontVideo.removeAttribute('src')
-        if (frontVideo.parentNode) frontVideo.parentNode.removeChild(frontVideo)
-      }
+      detachRenderVideo(backgroundVideo)
+      detachRenderVideo(frontVideo)
       if (videoObjectUrl) URL.revokeObjectURL(videoObjectUrl)
       if (frontVideoObjectUrl) URL.revokeObjectURL(frontVideoObjectUrl)
       convertedAnimeUrls.forEach((url) => URL.revokeObjectURL(url))
@@ -172,28 +165,15 @@ export async function recordVideoRealtimeWebm(form: FormData, cb: RealtimeRecord
     let mainVideoDurationMs: number | null = null
     if (form.mainMedia?.type === 'video') {
       const mainVideoBlob = await ensureWebmVideo(form.mainMedia.file, { onStatus, isCancelled, convertIfMp4: form.convertMp4InputToWebm })
-      frontVideoObjectUrl = URL.createObjectURL(mainVideoBlob)
-      frontVideo = document.createElement('video')
-      frontVideo.src = frontVideoObjectUrl
-      frontVideo.muted = !!form.audioFile
-      frontVideo.playsInline = true
-      frontVideo.loop = true
-      frontVideo.preload = 'auto'
-      frontVideo.setAttribute('playsinline', '')
-      await new Promise<void>((resolve, reject) => {
-        frontVideo!.oncanplay = () => {
-          frontVideo!.play().then(resolve).catch(reject)
-        }
-        frontVideo!.onerror = () => reject(new Error('Video failed to load'))
-        frontVideo!.load()
+      const mainAttached = await attachVideoForRender(mainVideoBlob, {
+        muted: !!form.audioFile,
+        loop: true,
       })
-      frontVideo.style.position = 'fixed'
-      frontVideo.style.left = '-9999px'
-      frontVideo.style.width = '1px'
-      frontVideo.style.height = '1px'
-      frontVideo.style.opacity = '0'
-      frontVideo.style.pointerEvents = 'none'
-      document.body.appendChild(frontVideo)
+      frontVideo = mainAttached.video
+      frontVideoObjectUrl = mainAttached.objectUrl
+      if (!form.audioFile) {
+        await frontVideo.play().catch(() => {})
+      }
       if (frontVideo.duration != null && isFinite(frontVideo.duration)) {
         mainVideoDurationMs = Math.round(frontVideo.duration * 1000)
         if (!(form.loopMainVideoToAudio && audioBuffer)) {
@@ -228,28 +208,10 @@ export async function recordVideoRealtimeWebm(form: FormData, cb: RealtimeRecord
 
     if (form.videoFile) {
       const bgVideoBlob = await ensureWebmVideo(form.videoFile, { onStatus, isCancelled, convertIfMp4: form.convertMp4InputToWebm })
-      videoObjectUrl = URL.createObjectURL(bgVideoBlob)
-      backgroundVideo = document.createElement('video')
-      backgroundVideo.src = videoObjectUrl
-      backgroundVideo.loop = true
-      backgroundVideo.muted = true
-      backgroundVideo.playsInline = true
-      backgroundVideo.preload = 'auto'
-      backgroundVideo.setAttribute('playsinline', '')
-      await new Promise<void>((resolve, reject) => {
-        backgroundVideo!.oncanplay = () => {
-          backgroundVideo!.play().then(resolve).catch(reject)
-        }
-        backgroundVideo!.onerror = () => reject(new Error('Video failed to load'))
-        backgroundVideo!.load()
-      })
-      backgroundVideo.style.position = 'fixed'
-      backgroundVideo.style.left = '-9999px'
-      backgroundVideo.style.width = '1px'
-      backgroundVideo.style.height = '1px'
-      backgroundVideo.style.opacity = '0'
-      backgroundVideo.style.pointerEvents = 'none'
-      document.body.appendChild(backgroundVideo)
+      const bgAttached = await attachVideoForRender(bgVideoBlob, { muted: true, loop: true })
+      backgroundVideo = bgAttached.video
+      videoObjectUrl = bgAttached.objectUrl
+      await backgroundVideo.play().catch(() => {})
     }
 
     let audioForLyrics: File | null = form.audioFile

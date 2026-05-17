@@ -4,6 +4,7 @@ import { resolveLyricsForRender } from './lyricSync'
 import { detectFaceInImage, detectFacesInImages, type FaceBox } from './faceDetection'
 import { convertImageToAnime, isAnimeConversionAvailable } from './animeConversion'
 import { seekVideo } from './videoSeek'
+import { attachVideoForRender, detachRenderVideo, probeVideoCanvasDecodable } from './videoLoader'
 
 let ffmpegSingleton: import('@ffmpeg/ffmpeg').FFmpeg | null = null
 let ffmpegLoadPromise: Promise<import('@ffmpeg/ffmpeg').FFmpeg> | null = null
@@ -90,11 +91,23 @@ export async function ensureWebmVideo(
   file: File,
   cb: { onStatus?: (msg: string | null) => void; isCancelled?: () => boolean; convertIfMp4?: boolean }
 ): Promise<Blob> {
-  if (cb.convertIfMp4 === false) return file
-  if (isWebmFile(file)) return file
-  const format = await detectVideoFormat(file)
-  if (format === 'webm') return file
-  if (format !== 'mp4' && !isMp4File(file)) return file
+  const cancelled = () => cb.isCancelled?.() ?? false
+
+  if (cb.convertIfMp4 === true) {
+    if (isWebmFile(file)) {
+      const ok = await probeVideoCanvasDecodable(file, cancelled)
+      if (ok) return file
+    }
+    const format = await detectVideoFormat(file)
+    if (format === 'webm') return file
+    if (format !== 'mp4' && !isMp4File(file)) return file
+    return convertMp4ToWebm(file, { onStatus: cb.onStatus, isCancelled: cb.isCancelled })
+  }
+
+  const decodable = await probeVideoCanvasDecodable(file, cancelled)
+  if (decodable) return file
+
+  cb.onStatus?.('Converting video to WebM for reliable playback…')
   return convertMp4ToWebm(file, { onStatus: cb.onStatus, isCancelled: cb.isCancelled })
 }
 
@@ -194,6 +207,61 @@ export async function extractAudioFromVideo(
   const out = await ffmpeg.readFile('audio_out.wav')
   await ffmpeg.deleteFile('audio_out.wav').catch(() => {})
   return new File([new Uint8Array(out as Uint8Array)], 'audio.wav', { type: 'audio/wav' })
+}
+
+/** Join multiple downloaded YouTube MP4 segments into one browser-friendly H.264/AAC clip. */
+export async function concatMp4VideoBlobs(
+  blobs: Blob[],
+  cb: { onStatus?: (msg: string | null) => void } = {}
+): Promise<Blob> {
+  const { onStatus } = cb
+  if (blobs.length === 0) throw new Error('No videos to combine')
+  if (blobs.length === 1) return blobs[0]
+
+  const ffmpeg = await getFFmpeg()
+  const inputNames = blobs.map((_, i) => `yt_concat_${i}.mp4`)
+
+  async function cleanup() {
+    for (const n of inputNames) await ffmpeg.deleteFile(n).catch(() => {})
+    await ffmpeg.deleteFile('yt_concat_out.mp4').catch(() => {})
+  }
+
+  try {
+    onStatus?.('Preparing clips…')
+    for (let i = 0; i < blobs.length; i++) {
+      await ffmpeg.writeFile(inputNames[i], await blobToUint8Array(blobs[i]))
+    }
+
+    let seg = ''
+    for (let i = 0; i < blobs.length; i++) {
+      seg += `[${i}:v:0][${i}:a:0]`
+    }
+    const filterComplex = `${seg}concat=n=${blobs.length}:v=1:a=1[outv][outa]`
+    const args: string[] = []
+    for (let i = 0; i < blobs.length; i++) args.push('-i', inputNames[i])
+    args.push(
+      '-filter_complex', filterComplex,
+      '-map', '[outv]',
+      '-map', '[outa]',
+      '-c:v', 'libx264',
+      '-pix_fmt', 'yuv420p',
+      '-preset', 'veryfast',
+      '-crf', '23',
+      '-c:a', 'aac',
+      '-movflags', '+faststart',
+      'yt_concat_out.mp4'
+    )
+    onStatus?.('Combining videos…')
+    const ret = await ffmpeg.exec(args)
+    if (ret !== 0) {
+      throw new Error('Could not merge videos — try fewer URLs or clips with different formats.')
+    }
+
+    const out = await ffmpeg.readFile('yt_concat_out.mp4')
+    return new Blob([new Uint8Array(out as Uint8Array)], { type: 'video/mp4' })
+  } finally {
+    await cleanup()
+  }
 }
 
 /** Max frames in FFmpeg's virtual FS at once. VP8 uses less memory than VP9. */
@@ -306,18 +374,9 @@ export async function renderVideoOfflineWebm(form: FormData, cb: OfflineRenderCa
     if (form.mainMedia?.type === 'video') {
       console.log('[FFmpeg] Loading main video…')
       mainVideoBlobForAudio = await ensureWebmVideo(form.mainMedia.file, { onStatus, isCancelled, convertIfMp4: form.convertMp4InputToWebm })
-      frontVideoUrl = URL.createObjectURL(mainVideoBlobForAudio)
-      frontVideo = document.createElement('video')
-      frontVideo.src = frontVideoUrl
-      frontVideo.muted = true
-      frontVideo.playsInline = true
-      frontVideo.preload = 'auto'
-      frontVideo.setAttribute('playsinline', '')
-      await new Promise<void>((resolve, reject) => {
-        frontVideo!.onloadeddata = () => resolve()
-        frontVideo!.onerror = () => reject(new Error('Video failed to load'))
-        frontVideo!.load()
-      })
+      const mainAttached = await attachVideoForRender(mainVideoBlobForAudio, { muted: true })
+      frontVideo = mainAttached.video
+      frontVideoUrl = mainAttached.objectUrl
       if (frontVideo.duration != null && isFinite(frontVideo.duration)) {
         mainVideoDurationMs = Math.round(frontVideo.duration * 1000)
         if (!(form.loopMainVideoToAudio && form.audioFile)) {
@@ -351,19 +410,9 @@ export async function renderVideoOfflineWebm(form: FormData, cb: OfflineRenderCa
     if (form.videoFile) {
       console.log('[FFmpeg] Loading background video…')
       const bgVideoBlob = await ensureWebmVideo(form.videoFile, { onStatus, isCancelled, convertIfMp4: form.convertMp4InputToWebm })
-      backgroundVideoUrl = URL.createObjectURL(bgVideoBlob)
-      backgroundVideo = document.createElement('video')
-      backgroundVideo.src = backgroundVideoUrl
-      backgroundVideo.loop = true
-      backgroundVideo.muted = true
-      backgroundVideo.playsInline = true
-      backgroundVideo.preload = 'auto'
-      backgroundVideo.setAttribute('playsinline', '')
-      await new Promise<void>((resolve, reject) => {
-        backgroundVideo!.onloadeddata = () => resolve()
-        backgroundVideo!.onerror = () => reject(new Error('Video failed to load'))
-        backgroundVideo!.load()
-      })
+      const bgAttached = await attachVideoForRender(bgVideoBlob, { muted: true, loop: true })
+      backgroundVideo = bgAttached.video
+      backgroundVideoUrl = bgAttached.objectUrl
       console.log('[FFmpeg] Background video loaded')
     }
 
@@ -646,6 +695,8 @@ export async function renderVideoOfflineWebm(form: FormData, cb: OfflineRenderCa
     return new Blob([new Uint8Array(out as Uint8Array)], { type: mime })
   } finally {
     try {
+      detachRenderVideo(frontVideo)
+      detachRenderVideo(backgroundVideo)
       if (backgroundVideoUrl) URL.revokeObjectURL(backgroundVideoUrl)
       if (frontVideoUrl) URL.revokeObjectURL(frontVideoUrl)
       convertedAnimeUrls.forEach((u) => URL.revokeObjectURL(u))

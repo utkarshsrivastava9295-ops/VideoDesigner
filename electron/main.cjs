@@ -50,10 +50,25 @@ async function resolveToVideoUrl(input) {
   throw new Error('Please enter a valid YouTube URL (video or playlist).')
 }
 
+/** Prefer H.264 MP4 so Chromium can draw frames to canvas (AV1/VP9-only often = audio-only in export). */
+function ytdlH264MergedStream(videoUrl) {
+  const h264Filter = (format) =>
+    format.container === 'mp4' &&
+    format.hasVideo &&
+    format.hasAudio &&
+    (!format.videoCodec || /avc|h264|mp4v/i.test(format.videoCodec))
+
+  try {
+    return ytdl(videoUrl, { quality: 'highest', filter: h264Filter })
+  } catch {
+    return ytdl(videoUrl, { quality: 'highest' })
+  }
+}
+
 ipcMain.handle('download-youtube-video', async (_event, url) => {
   try {
     const videoUrl = await resolveToVideoUrl(url)
-    const stream = ytdl(videoUrl, { quality: 'highest' })
+    const stream = ytdlH264MergedStream(videoUrl)
     const buffer = await streamToBuffer(stream)
     const base64 = buffer.toString('base64')
     return { data: base64, mime: 'video/mp4' }
